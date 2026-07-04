@@ -257,16 +257,28 @@ ENV VISUAL=nano
 
 # Default powerline10k theme
 ARG ZSH_IN_DOCKER_VERSION=1.2.0
-RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
-  -p git \
-  -p fzf \
-  -p zsh-autosuggestions \
-  -p zsh-syntax-highlighting \
-  -a "source /usr/share/doc/fzf/examples/key-bindings.zsh" \
-  -a "source /usr/share/doc/fzf/examples/completion.zsh" \
-  -a "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
-  -a "typeset -g POWERLEVEL9K_INSTANT_PROMPT=quiet" \
-  -x
+# Retry with a timeout: the installer clones oh-my-zsh from GitHub and
+# occasionally hangs on flaky networks with no timeout of its own.
+RUN success=false; \
+  for i in 1 2 3; do \
+    echo "Installing oh-my-zsh + plugins (attempt $i/3)..."; \
+    if timeout 180 sh -c "$(wget --timeout=30 --tries=3 -O- https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
+      -p git \
+      -p fzf \
+      -p zsh-autosuggestions \
+      -p zsh-syntax-highlighting \
+      -a "source /usr/share/doc/fzf/examples/key-bindings.zsh" \
+      -a "source /usr/share/doc/fzf/examples/completion.zsh" \
+      -a "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
+      -a "typeset -g POWERLEVEL9K_INSTANT_PROMPT=quiet" \
+      -x; then \
+      success=true; break; \
+    fi; \
+    echo "attempt $i failed or timed out; cleaning up and retrying..."; \
+    rm -rf "$HOME/.oh-my-zsh"; \
+    sleep 5; \
+  done; \
+  $success
 
 # Install oh-my-zsh community plugins
 RUN git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions && \
