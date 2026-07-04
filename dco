@@ -1,0 +1,337 @@
+#!/usr/bin/env bash
+# dco — Dev Container Open
+# Usage:
+#   dco                              # shell in /workspace in CWD's container
+#   dco /path/to/project             # shell in /workspace in specific project
+#   dco . gpu-trading                # named sub-config in CWD
+#   dco /path/to/project name        # named sub-config in project
+#   dco --claude                     # open CWD's container, attach/create tmux 'claude' session
+#   dco /path/to/project --claude    # same, in a specific project
+#                                    # (detach with Ctrl-b d; rerun --claude to reattach)
+#   dco --rebuild                    # force rebuild before attaching
+#   dco --stop [path]                # stop/remove a project's container
+#   dco --list                       # list running devcontainers
+
+set -euo pipefail
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+die()  { echo "dco: error: $*" >&2; exit 1; }
+info() { echo "dco: $*" >&2; }
+
+# ── help ─────────────────────────────────────────────────────────────────────
+usage() {
+  cat >&2 <<'EOF'
+dco — Dev Container Open
+
+Usage:
+  dco [path] [sub-config] [flags]
+
+Arguments:
+  path          Project directory (default: current directory)
+  sub-config    Named config under .devcontainer/<name>/devcontainer.json
+
+Flags:
+  -c, --claude    Launch Claude Code in a persistent tmux session ('claude')
+  -r, --rebuild   Force rebuild (removes existing container first)
+  -s, --stop      Stop and remove the project's container
+  -l, --list      List all running devcontainers
+  -h, --help      Show this help
+
+--claude runs Claude inside "tmux new-session -A -s claude", so it
+attaches to an already-running session if one exists, or creates one.
+Detach with Ctrl-b then d — Claude keeps running in the container.
+Rerun `dco --claude` (same project) later to reattach to it.
+
+Examples:
+  dco                              # shell in CWD's container
+  dco ~/projects/trading           # shell in specific project
+  dco . gpu-trading                # named sub-config in CWD
+  dco --claude                     # attach/create tmux session running Claude
+  dco --rebuild --claude           # rebuild then launch Claude
+  dco --stop ~/projects/trading    # remove that project's container
+  dco --list                       # show all running devcontainers
+
+Shell function (add to .zshrc):
+  cdco() { cd "$1" && dco "${@:2}"; }
+EOF
+  exit 0
+}
+
+# ── args ─────────────────────────────────────────────────────────────────────
+LAUNCH_CLAUDE=false
+REBUILD=false
+STOP=false
+LIST=false
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    --claude|-c)  LAUNCH_CLAUDE=true ;;
+    --rebuild|-r) REBUILD=true ;;
+    --stop|-s)    STOP=true ;;
+    --list|-l)    LIST=true ;;
+    --help|-h)    usage ;;
+    *) POSITIONAL+=("$arg") ;;
+  esac
+done
+
+# ── list mode ─────────────────────────────────────────────────────────────────
+if $LIST; then
+  docker ps \
+    --filter "label=devcontainer.local_folder" \
+    --format "table {{.Names}}\t{{.Status}}\t{{.Label \"devcontainer.local_folder\"}}"
+  exit 0
+fi
+
+WORKSPACE="${POSITIONAL[0]:-$(pwd)}"
+SUB_CONFIG="${POSITIONAL[1]:-}"
+WORKSPACE="$(realpath "$WORKSPACE")"
+
+[[ -d "$WORKSPACE" ]] || die "not a directory: $WORKSPACE"
+
+# ── stop mode ─────────────────────────────────────────────────────────────────
+if $STOP; then
+  CONTAINER=$(docker ps -q --filter "label=devcontainer.local_folder=$WORKSPACE")
+  if [[ -z "$CONTAINER" ]]; then
+    # also check stopped containers
+    CONTAINER=$(docker ps -aq --filter "label=devcontainer.local_folder=$WORKSPACE")
+  fi
+  [[ -n "$CONTAINER" ]] || die "no container found for $WORKSPACE"
+  info "removing container for $WORKSPACE ..."
+  docker rm -f "$CONTAINER"
+  info "done."
+  exit 0
+fi
+
+# ── find config ───────────────────────────────────────────────────────────────
+if [[ -n "$SUB_CONFIG" ]]; then
+  CONFIG="$WORKSPACE/.devcontainer/$SUB_CONFIG/devcontainer.json"
+elif [[ -f "$WORKSPACE/.devcontainer.json" ]]; then
+  CONFIG="$WORKSPACE/.devcontainer.json"
+elif [[ -f "$WORKSPACE/.devcontainer/devcontainer.json" ]]; then
+  CONFIG="$WORKSPACE/.devcontainer/devcontainer.json"
+else
+  # list available configs if multiple exist
+  CONFIGS=("$WORKSPACE"/.devcontainer/*/devcontainer.json)
+  if [[ ${#CONFIGS[@]} -eq 1 && -f "${CONFIGS[0]}" ]]; then
+    CONFIG="${CONFIGS[0]}"
+  elif [[ ${#CONFIGS[@]} -gt 1 ]]; then
+    echo "dco: multiple configs found — pick one:" >&2
+    for c in "${CONFIGS[@]}"; do
+      name="$(basename "$(dirname "$c")")"
+      echo "  dco $(basename "$WORKSPACE") $name" >&2
+    done
+    exit 1
+  else
+    info "no devcontainer.json found — creating default .devcontainer in $WORKSPACE"
+    mkdir -p "$WORKSPACE/.devcontainer"
+    cat > "$WORKSPACE/.devcontainer/devcontainer.json" <<'EOF'
+{
+  "name": "Claude Code Sandbox",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "TZ": "${localEnv:TZ:America/Los_Angeles}",
+      "CLAUDE_CODE_VERSION": "latest",
+      "GIT_DELTA_VERSION": "0.18.2",
+      "ZSH_IN_DOCKER_VERSION": "1.2.0"
+    }
+  },
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "eamodio.gitlens",
+        "ms-toolsai.jupyter",
+        "ms-python.python"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.codeActionsOnSave": {
+          "source.fixAll.eslint": "explicit"
+        },
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.profiles.linux": {
+          "bash": { "path": "bash", "icon": "terminal-bash" },
+          "zsh":  { "path": "zsh" }
+        }
+      }
+    }
+  },
+  "remoteUser": "node",
+  "mounts": [
+    "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
+    "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume"
+  ],
+  "containerEnv": {
+    "NODE_OPTIONS": "--max-old-space-size=4096",
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
+    "POWERLEVEL9K_DISABLE_GITSTATUS": "true"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace",
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+  "waitFor": "postStartCommand"
+}
+EOF
+    cat > "$WORKSPACE/.devcontainer/Dockerfile" <<'EOF'
+FROM node:20
+
+ARG TZ
+ENV TZ="$TZ"
+
+ARG CLAUDE_CODE_VERSION=latest
+
+# Install basic development tools and iptables/ipset
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  less \
+  git \
+  procps \
+  sudo \
+  fzf \
+  zsh \
+  tmux \
+  man-db \
+  unzip \
+  gnupg2 \
+  gh \
+  iptables \
+  ipset \
+  iproute2 \
+  dnsutils \
+  aggregate \
+  jq \
+  nano \
+  vim \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Ensure default node user has access to /usr/local/share
+RUN mkdir -p /usr/local/share/npm-global && \
+  chown -R node:node /usr/local/share
+
+ARG USERNAME=node
+
+# Persist bash history.
+RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
+  && mkdir /commandhistory \
+  && touch /commandhistory/.bash_history \
+  && chown -R $USERNAME /commandhistory
+
+# Set `DEVCONTAINER` environment variable to help with orientation
+ENV DEVCONTAINER=true
+
+# Create workspace and config directories and set permissions
+RUN mkdir -p /workspace /home/node/.claude && \
+  chown -R node:node /workspace /home/node/.claude
+
+WORKDIR /workspace
+
+ARG GIT_DELTA_VERSION=0.18.2
+RUN ARCH=$(dpkg --print-architecture) && \
+  wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
+  sudo dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
+  rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
+
+# Set up non-root user
+USER node
+
+# Install global packages
+ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
+ENV PATH=/home/node/.local/bin:$PATH:/usr/local/share/npm-global/bin
+
+# Install uv (runs as node user so it lands in /home/node/.local/bin)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Set the default shell to zsh rather than sh
+ENV SHELL=/bin/zsh
+
+# Set the default editor and visual
+ENV EDITOR=nano
+ENV VISUAL=nano
+
+# Default powerline10k theme
+ARG ZSH_IN_DOCKER_VERSION=1.2.0
+RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
+  -p git \
+  -p fzf \
+  -p zsh-autosuggestions \
+  -p zsh-syntax-highlighting \
+  -a "source /usr/share/doc/fzf/examples/key-bindings.zsh" \
+  -a "source /usr/share/doc/fzf/examples/completion.zsh" \
+  -a "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
+  -a "typeset -g POWERLEVEL9K_INSTANT_PROMPT=quiet" \
+  -x
+
+# Install oh-my-zsh community plugins
+RUN git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions && \
+  git clone https://github.com/zsh-users/zsh-syntax-highlighting ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+
+# Install Claude
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+
+# Copy and set up firewall script
+COPY init-firewall.sh /usr/local/bin/
+USER root
+RUN chmod +x /usr/local/bin/init-firewall.sh && \
+  echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/node-firewall && \
+  chmod 0440 /etc/sudoers.d/node-firewall
+USER node
+EOF
+    cat > "$WORKSPACE/.devcontainer/init-firewall.sh" <<'EOF'
+#!/bin/bash
+# Firewall is disabled by default. Uncomment the block below to enable it.
+exit 0
+EOF
+    chmod +x "$WORKSPACE/.devcontainer/init-firewall.sh"
+    CONFIG="$WORKSPACE/.devcontainer/devcontainer.json"
+    info "created $CONFIG (Claude Code Sandbox)"
+  fi
+fi
+
+[[ -f "$CONFIG" ]] || die "config not found: $CONFIG"
+info "using config: ${CONFIG#"$WORKSPACE/"}"
+
+# ── ensure devcontainer CLI ───────────────────────────────────────────────────
+if ! command -v devcontainer &>/dev/null; then
+  die "@devcontainers/cli not found. Install it with:
+  npm install -g @devcontainers/cli
+  (requires Node >=20 — use fnm: https://github.com/Schniz/fnm)"
+fi
+
+# ── bring up the container ────────────────────────────────────────────────────
+info "starting container for $WORKSPACE ..."
+UP_ARGS=()
+$REBUILD && UP_ARGS+=(--remove-existing-container)
+devcontainer up \
+  --workspace-folder "$WORKSPACE" \
+  --config "$CONFIG" \
+  "${UP_ARGS[@]}"
+
+# ── determine shell ───────────────────────────────────────────────────────────
+# prefer zsh, fall back to bash
+SHELL_CMD="zsh"
+devcontainer exec \
+  --workspace-folder "$WORKSPACE" \
+  --config "$CONFIG" \
+  -- bash -c "command -v zsh" &>/dev/null || SHELL_CMD="bash"
+
+# ── exec in ───────────────────────────────────────────────────────────────────
+if $LAUNCH_CLAUDE; then
+  info "attaching to tmux session 'claude' (creating it if needed; detach with Ctrl-b d)..."
+  exec devcontainer exec \
+    --workspace-folder "$WORKSPACE" \
+    --config "$CONFIG" \
+    -- "$SHELL_CMD" -lc "tmux new-session -A -s claude claude"
+else
+  info "attaching shell ($SHELL_CMD) in /workspace..."
+  exec devcontainer exec \
+    --workspace-folder "$WORKSPACE" \
+    --config "$CONFIG" \
+    -- "$SHELL_CMD" -l
+fi
