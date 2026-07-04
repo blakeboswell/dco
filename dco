@@ -313,6 +313,15 @@ devcontainer up \
   --config "$CONFIG" \
   "${UP_ARGS[@]}"
 
+# ── sync git identity from host ───────────────────────────────────────────────
+# container filesystem isn't persisted across rebuilds, so re-sync every launch
+GIT_NAME="$(git config --global user.name 2>/dev/null || true)"
+GIT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
+[[ -n "$GIT_NAME" ]] && devcontainer exec --workspace-folder "$WORKSPACE" --config "$CONFIG" \
+  -- git config --global user.name "$GIT_NAME" &>/dev/null
+[[ -n "$GIT_EMAIL" ]] && devcontainer exec --workspace-folder "$WORKSPACE" --config "$CONFIG" \
+  -- git config --global user.email "$GIT_EMAIL" &>/dev/null
+
 # ── determine shell ───────────────────────────────────────────────────────────
 # prefer zsh, fall back to bash
 SHELL_CMD="zsh"

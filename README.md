@@ -54,6 +54,14 @@ This only works while the container itself stays up — don't run `dco --stop`
 or restart Docker in between. Plain `dco` shells (without `--claude`) are not
 persistent; each invocation opens a fresh `devcontainer exec` session.
 
+## Git identity
+
+Every launch, `dco` reads `git config --global user.name` / `user.email` from
+the host and sets the same values inside the container (`git config --global`
+there too). No flags, no manual setup per container — it just mirrors
+whatever your host is currently configured with. Only these two values are
+synced; other git config (aliases, signing, credential helpers) is not.
+
 ## Shell function
 
 Add to `.zshrc` to `cd` and open in one step:
