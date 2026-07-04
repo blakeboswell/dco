@@ -10,8 +10,12 @@ remembering `devcontainer up` / `devcontainer exec` invocations by hand.
 - `@devcontainers/cli`: `npm install -g @devcontainers/cli` (needs Node >= 20)
 
 If a project has no `.devcontainer.json` / `.devcontainer/devcontainer.json`,
-`dco` scaffolds a default one (Node 20, zsh, Claude Code preinstalled, tmux,
-firewall hook disabled by default).
+`dco` scaffolds a default one (Node 20, zsh, Claude Code preinstalled, tmux).
+The scaffolded config wires a `postStartCommand` hook to
+`.devcontainer/init-firewall.sh`, but that script is a no-op stub — dco
+doesn't implement or support network/firewall restriction. Fill it in
+yourself with your own iptables/ipset rules if you want the container's
+network access restricted.
 
 ## Usage
 

@@ -300,7 +300,10 @@ USER node
 EOF
     cat > "$WORKSPACE/.devcontainer/init-firewall.sh" <<'EOF'
 #!/bin/bash
-# Firewall is disabled by default. Uncomment the block below to enable it.
+# No-op placeholder. postStartCommand runs this script, but dco doesn't
+# implement or support network/firewall restriction — add your own
+# iptables/ipset rules here if you want the container's network access
+# restricted.
 exit 0
 EOF
     chmod +x "$WORKSPACE/.devcontainer/init-firewall.sh"
