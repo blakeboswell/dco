@@ -44,7 +44,9 @@ RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhisto
 ENV DEVCONTAINER=true
 
 # Create workspace and config directories and set permissions
+ARG CLAUDE_THEME=dark-daltonized
 RUN mkdir -p /workspace /home/node/.claude && \
+  echo "{\"theme\": \"$CLAUDE_THEME\"}" > /home/node/.claude/settings.json && \
   chown -R node:node /workspace /home/node/.claude
 
 WORKDIR /workspace

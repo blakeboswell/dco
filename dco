@@ -133,7 +133,8 @@ else
       "TZ": "${localEnv:TZ:America/Los_Angeles}",
       "CLAUDE_CODE_VERSION": "latest",
       "GIT_DELTA_VERSION": "0.18.2",
-      "ZSH_IN_DOCKER_VERSION": "1.2.0"
+      "ZSH_IN_DOCKER_VERSION": "1.2.0",
+      "CLAUDE_THEME": "${localEnv:CLAUDE_THEME:dark-daltonized}"
     }
   },
   "runArgs": [
@@ -227,7 +228,9 @@ RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhisto
 ENV DEVCONTAINER=true
 
 # Create workspace and config directories and set permissions
+ARG CLAUDE_THEME=dark-daltonized
 RUN mkdir -p /workspace /home/node/.claude && \
+  echo "{\"theme\": \"$CLAUDE_THEME\"}" > /home/node/.claude/settings.json && \
   chown -R node:node /workspace /home/node/.claude
 
 WORKDIR /workspace
