@@ -17,6 +17,14 @@ doesn't implement or support network/firewall restriction. Fill it in
 yourself with your own iptables/ipset rules if you want the container's
 network access restricted.
 
+## Install
+
+```sh
+git clone https://github.com/<you>/dco.git
+chmod +x dco/dco
+ln -s "$(pwd)/dco/dco" ~/.local/bin/dco   # anywhere on your PATH works
+```
+
 ## Usage
 
 ```
