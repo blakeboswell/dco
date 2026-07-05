@@ -14,6 +14,8 @@
 
 set -euo pipefail
 
+SHAREDIR="@SHAREDIR@"
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 die()  { echo "dco: error: $*" >&2; exit 1; }
 info() { echo "dco: $*" >&2; }
@@ -123,191 +125,18 @@ else
     exit 1
   else
     info "no devcontainer.json found — creating default .devcontainer in $WORKSPACE"
-    mkdir -p "$WORKSPACE/.devcontainer"
-    cat > "$WORKSPACE/.devcontainer/devcontainer.json" <<'EOF'
-{
-  "name": "Claude Code Sandbox",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "args": {
-      "TZ": "${localEnv:TZ:America/Los_Angeles}",
-      "CLAUDE_CODE_VERSION": "latest",
-      "GIT_DELTA_VERSION": "0.18.2",
-      "ZSH_IN_DOCKER_VERSION": "1.2.0",
-      "CLAUDE_THEME": "${localEnv:CLAUDE_THEME:dark-daltonized}"
-    }
-  },
-  "runArgs": [
-    "--cap-add=NET_ADMIN",
-    "--cap-add=NET_RAW"
-  ],
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "anthropic.claude-code",
-        "dbaeumer.vscode-eslint",
-        "esbenp.prettier-vscode",
-        "eamodio.gitlens",
-        "ms-toolsai.jupyter",
-        "ms-python.python"
-      ],
-      "settings": {
-        "editor.formatOnSave": true,
-        "editor.defaultFormatter": "esbenp.prettier-vscode",
-        "editor.codeActionsOnSave": {
-          "source.fixAll.eslint": "explicit"
-        },
-        "terminal.integrated.defaultProfile.linux": "zsh",
-        "terminal.integrated.profiles.linux": {
-          "bash": { "path": "bash", "icon": "terminal-bash" },
-          "zsh":  { "path": "zsh" }
-        }
-      }
-    }
-  },
-  "remoteUser": "node",
-  "mounts": [
-    "source=claude-code-bashhistory-${localWorkspaceFolderBasename},target=/commandhistory,type=volume",
-    "source=claude-code-config-${localWorkspaceFolderBasename},target=/home/node/.claude,type=volume"
-  ],
-  "containerEnv": {
-    "NODE_OPTIONS": "--max-old-space-size=4096",
-    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
-    "POWERLEVEL9K_DISABLE_GITSTATUS": "true"
-  },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
-  "workspaceFolder": "/workspace",
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
-  "waitFor": "postStartCommand"
-}
-EOF
-    cat > "$WORKSPACE/.devcontainer/Dockerfile" <<'EOF'
-FROM node:20
+    [[ -d "$SHAREDIR/templates" ]] || \
+      die "template dir not found: $SHAREDIR/templates — run 'make install', don't execute dco.in directly"
 
-ARG TZ
-ENV TZ="$TZ"
+    DEST="$WORKSPACE/.devcontainer"
+    mkdir -p "$DEST"
+    cp "$SHAREDIR/templates/devcontainer.json" "$DEST/devcontainer.json"
+    cp "$SHAREDIR/templates/Dockerfile"        "$DEST/Dockerfile"
+    cp "$SHAREDIR/templates/init-firewall.sh"  "$DEST/init-firewall.sh"
+    cp "$SHAREDIR/config/allowlist.txt"        "$DEST/allowlist.txt"
+    chmod +x "$DEST/init-firewall.sh"
 
-ARG CLAUDE_CODE_VERSION=latest
-
-# Install basic development tools and iptables/ipset
-RUN apt-get update && apt-get install -y --no-install-recommends \
-  less \
-  git \
-  procps \
-  sudo \
-  fzf \
-  zsh \
-  tmux \
-  man-db \
-  unzip \
-  gnupg2 \
-  gh \
-  iptables \
-  ipset \
-  iproute2 \
-  dnsutils \
-  aggregate \
-  jq \
-  nano \
-  vim \
-  && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Ensure default node user has access to /usr/local/share
-RUN mkdir -p /usr/local/share/npm-global && \
-  chown -R node:node /usr/local/share
-
-ARG USERNAME=node
-
-# Persist bash history.
-RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
-  && mkdir /commandhistory \
-  && touch /commandhistory/.bash_history \
-  && chown -R $USERNAME /commandhistory
-
-# Set `DEVCONTAINER` environment variable to help with orientation
-ENV DEVCONTAINER=true
-
-# Create workspace and config directories and set permissions
-ARG CLAUDE_THEME=dark-daltonized
-RUN mkdir -p /workspace /home/node/.claude && \
-  echo "{\"theme\": \"$CLAUDE_THEME\"}" > /home/node/.claude/settings.json && \
-  chown -R node:node /workspace /home/node/.claude
-
-WORKDIR /workspace
-
-ARG GIT_DELTA_VERSION=0.18.2
-RUN ARCH=$(dpkg --print-architecture) && \
-  wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  sudo dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
-
-# Set up non-root user
-USER node
-
-# Install global packages
-ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
-ENV PATH=/home/node/.local/bin:$PATH:/usr/local/share/npm-global/bin
-
-# Install uv (runs as node user so it lands in /home/node/.local/bin)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Set the default shell to zsh rather than sh
-ENV SHELL=/bin/zsh
-
-# Set the default editor and visual
-ENV EDITOR=nano
-ENV VISUAL=nano
-
-# Default powerline10k theme
-ARG ZSH_IN_DOCKER_VERSION=1.2.0
-# Retry with a timeout: the installer clones oh-my-zsh from GitHub and
-# occasionally hangs on flaky networks with no timeout of its own.
-RUN success=false; \
-  for i in 1 2 3; do \
-    echo "Installing oh-my-zsh + plugins (attempt $i/3)..."; \
-    if timeout 180 sh -c "$(wget --timeout=30 --tries=3 -O- https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
-      -p git \
-      -p fzf \
-      -p zsh-autosuggestions \
-      -p zsh-syntax-highlighting \
-      -a "source /usr/share/doc/fzf/examples/key-bindings.zsh" \
-      -a "source /usr/share/doc/fzf/examples/completion.zsh" \
-      -a "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
-      -a "typeset -g POWERLEVEL9K_INSTANT_PROMPT=quiet" \
-      -x; then \
-      success=true; break; \
-    fi; \
-    echo "attempt $i failed or timed out; cleaning up and retrying..."; \
-    rm -rf "$HOME/.oh-my-zsh"; \
-    sleep 5; \
-  done; \
-  $success
-
-# Install oh-my-zsh community plugins
-RUN git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions && \
-  git clone https://github.com/zsh-users/zsh-syntax-highlighting ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
-
-# Install Claude
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
-
-# Copy and set up firewall script
-COPY init-firewall.sh /usr/local/bin/
-USER root
-RUN chmod +x /usr/local/bin/init-firewall.sh && \
-  echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/node-firewall && \
-  chmod 0440 /etc/sudoers.d/node-firewall
-USER node
-EOF
-    cat > "$WORKSPACE/.devcontainer/init-firewall.sh" <<'EOF'
-#!/bin/bash
-# No-op placeholder. postStartCommand runs this script, but dco doesn't
-# implement or support network/firewall restriction — add your own
-# iptables/ipset rules here if you want the container's network access
-# restricted.
-exit 0
-EOF
-    chmod +x "$WORKSPACE/.devcontainer/init-firewall.sh"
-    CONFIG="$WORKSPACE/.devcontainer/devcontainer.json"
+    CONFIG="$DEST/devcontainer.json"
     info "created $CONFIG (Claude Code Sandbox)"
   fi
 fi

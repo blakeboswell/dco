@@ -10,20 +10,32 @@ remembering `devcontainer up` / `devcontainer exec` invocations by hand.
 - `@devcontainers/cli`: `npm install -g @devcontainers/cli` (needs Node >= 20)
 
 If a project has no `.devcontainer.json` / `.devcontainer/devcontainer.json`,
-`dco` scaffolds a default one (Node 20, zsh, Claude Code preinstalled, tmux).
+`dco` scaffolds a default one (Node 20, zsh, Claude Code preinstalled, tmux)
+by copying `templates/devcontainer.json`, `templates/Dockerfile`, and
+`templates/init-firewall.sh` from wherever dco was installed. Edit those
+files (or `config/allowlist.txt`, see below) to change what gets scaffolded
+into new projects — everything is a plain file, no bash escaping involved.
+
 The scaffolded config wires a `postStartCommand` hook to
-`.devcontainer/init-firewall.sh`, but that script is a no-op stub — dco
-doesn't implement or support network/firewall restriction. Fill it in
-yourself with your own iptables/ipset rules if you want the container's
-network access restricted.
+`.devcontainer/init-firewall.sh`, which enforces an outbound network
+allowlist from `.devcontainer/allowlist.txt` (one domain per line, `#`
+comments and blank lines ignored). GitHub is always reachable once
+enforcement is active (needed for `git`/`gh`). **An empty allowlist (the
+default) fully disables the firewall** — same as today's no-op behavior —
+so existing/default projects are unaffected until you opt in. The allowlist
+is baked into the image at build time, not read live: after editing
+`.devcontainer/allowlist.txt`, run `dco --rebuild` for it to take effect.
 
 ## Install
 
 ```sh
 git clone https://github.com/<you>/dco.git
-chmod +x dco/dco
-ln -s "$(pwd)/dco/dco" ~/.local/bin/dco   # anywhere on your PATH works
+cd dco
+make install                 # installs to ~/.local/bin and ~/.local/share/dco
 ```
+
+Override the install location with `make install PREFIX=/usr/local`.
+`make uninstall` removes both. See `make help` for all targets.
 
 ## Usage
 
@@ -81,3 +93,10 @@ Add to `.zshrc` to `cd` and open in one step:
 ```sh
 cdco() { cd "$1" && dco "${@:2}"; }
 ```
+
+## Developing dco
+
+This repo's own `.devcontainer/` is generated from `templates/` and
+`config/allowlist.txt` — never hand-edit files under `.devcontainer/`
+directly. After changing a template or the allowlist, run
+`make regen-devcontainer` and commit the result.
