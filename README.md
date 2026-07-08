@@ -1,8 +1,10 @@
 # dco — Dev Container Open
 
-A small wrapper around the [`devcontainer` CLI](https://github.com/devcontainers/cli) for
-quickly opening a shell (or Claude Code) in a project's devcontainer, without
-remembering `devcontainer up` / `devcontainer exec` invocations by hand.
+`dco` gets you into a sandboxed dev container for a project in one command —
+scaffolding a sensible default if none exists, keeping your git identity
+synced from the host, and treating Claude Code sessions as persistent rather
+than one-off. It's built on the
+[`devcontainer` CLI](https://github.com/devcontainers/cli).
 
 ## Prerequisites
 
