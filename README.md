@@ -1,6 +1,6 @@
 # dco — Dev Container Open
 
-`dco` gets you into a sandboxed dev container for a project in one command —
+`dco` creates and manages a sandboxed dev container for a project in one command —
 scaffolding a sensible default if none exists, keeping your git identity
 synced from the host, and treating Claude Code sessions as persistent rather
 than one-off. It's built on the
