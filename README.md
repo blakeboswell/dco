@@ -14,13 +14,15 @@ than one-off. It's built on the
 ## Install
 
 ```sh
-git clone https://github.com/blakeboswell/dco.git
-cd dco
-make install                 # installs to ~/.local/bin and ~/.local/share/dco
+curl -fsSL https://raw.githubusercontent.com/blakeboswell/dco/main/install.sh | sh
 ```
 
-Override the install location with `make install PREFIX=/usr/local`.
-`make uninstall` removes both. See `make help` for all targets.
+Installs `dco` to `~/.local/bin` and its templates/config to
+`~/.local/share/dco`. Override the location with
+`curl ... | sh -s -- PREFIX=/usr/local`.
+
+To uninstall, clone the repo and run `make uninstall` (with the same
+`PREFIX` if you overrode it). See `make help` for all targets.
 
 ## Usage
 
