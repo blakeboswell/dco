@@ -127,13 +127,13 @@ else
     info "no devcontainer.json found — creating default .devcontainer in $WORKSPACE"
     [[ -d "$SHAREDIR/templates" ]] || \
       die "template dir not found: $SHAREDIR/templates — run 'make install', don't execute dco.in directly"
+    [[ -f "$SHAREDIR/config/allowlist.txt" ]] || \
+      die "config not found: $SHAREDIR/config/allowlist.txt — run 'make install', don't execute dco.in directly"
 
     DEST="$WORKSPACE/.devcontainer"
     mkdir -p "$DEST"
-    cp "$SHAREDIR/templates/devcontainer.json" "$DEST/devcontainer.json"
-    cp "$SHAREDIR/templates/Dockerfile"        "$DEST/Dockerfile"
-    cp "$SHAREDIR/templates/init-firewall.sh"  "$DEST/init-firewall.sh"
-    cp "$SHAREDIR/config/allowlist.txt"        "$DEST/allowlist.txt"
+    cp -r "$SHAREDIR/templates/." "$DEST/"
+    cp "$SHAREDIR/config/allowlist.txt" "$DEST/allowlist.txt"
     chmod +x "$DEST/init-firewall.sh"
 
     CONFIG="$DEST/devcontainer.json"

@@ -9,22 +9,29 @@ help:
 	@echo "make uninstall [PREFIX=...]   remove installed dco and \$$(SHAREDIR)"
 	@echo "make regen-devcontainer       regenerate this repo's own .devcontainer/ from templates/"
 
+# Escaped for safe use inside a sed replacement (backslash, &, and the
+# s|...|...| delimiter all need escaping or PREFIX values containing them
+# corrupt or break the substitution).
+SHAREDIR_SED_SAFE := $(shell printf '%s' "$(SHAREDIR)" | sed -e 's/[\\&|]/\\&/g')
+
 install:
 	install -d "$(BINDIR)" "$(SHAREDIR)/templates" "$(SHAREDIR)/config"
-	sed 's|@SHAREDIR@|$(SHAREDIR)|g' dco.in > "$(BINDIR)/dco"
+	sed 's|@SHAREDIR@|$(SHAREDIR_SED_SAFE)|g' dco.in > "$(BINDIR)/dco.tmp"
+	mv -f "$(BINDIR)/dco.tmp" "$(BINDIR)/dco"
 	chmod +x "$(BINDIR)/dco"
-	cp templates/devcontainer.json templates/Dockerfile templates/init-firewall.sh "$(SHAREDIR)/templates/"
+	cp -r templates/. "$(SHAREDIR)/templates/"
 	chmod +x "$(SHAREDIR)/templates/init-firewall.sh"
 	cp config/allowlist.txt "$(SHAREDIR)/config/"
 	@echo "installed $(BINDIR)/dco (SHAREDIR=$(SHAREDIR))"
 
 uninstall:
+	@[ -e "$(BINDIR)/dco" ] || [ -d "$(SHAREDIR)" ] || \
+	  echo "warning: nothing found at BINDIR=$(BINDIR) / SHAREDIR=$(SHAREDIR) — if you installed with a custom PREFIX, pass it here too: make uninstall PREFIX=..." >&2
 	rm -f "$(BINDIR)/dco"
 	rm -rf "$(SHAREDIR)"
 
 regen-devcontainer:
-	rm -rf .devcontainer
 	mkdir -p .devcontainer
-	cp templates/devcontainer.json templates/Dockerfile templates/init-firewall.sh .devcontainer/
+	cp -r templates/. .devcontainer/
 	cp config/allowlist.txt .devcontainer/allowlist.txt
 	chmod +x .devcontainer/init-firewall.sh

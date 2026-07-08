@@ -66,6 +66,10 @@ if ! echo "$gh_ranges" | jq -e '.web and .api and .git' >/dev/null; then
 fi
 
 echo "Processing GitHub IPs..."
+# allowed-domains is an IPv4-only ipset (hash:net, no `family inet6`) and
+# there's no ip6tables enforcement below, so IPv6 ranges are filtered out
+# here explicitly rather than left to fail (or be silently dropped by
+# `aggregate`) further down.
 while read -r cidr; do
     if [[ ! "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
         echo "ERROR: Invalid CIDR range from GitHub meta: $cidr"
@@ -73,7 +77,7 @@ while read -r cidr; do
     fi
     echo "Adding GitHub range $cidr"
     ipset add allowed-domains "$cidr" -exist
-done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q)
+done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$' | aggregate -q)
 
 # Resolve and add domains from the allowlist
 for domain in "${ALLOWED_DOMAINS[@]}"; do
