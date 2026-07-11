@@ -151,3 +151,27 @@ the host and sets the same values inside the container (`git config --global`
 there too). No flags, no manual setup per container: it just mirrors
 whatever your host is currently configured with. Only these two values are
 synced; other git config (aliases, signing, credential helpers) is not.
+
+## Development
+
+Tests use [bats-core](https://github.com/bats-core/bats-core):
+
+```sh
+npm install -g bats
+make test
+```
+
+`test/unit.bats` covers `dco.in`'s standalone helper functions (URL/slug
+encoding, GitHub remote parsing, template scaffolding) by sourcing the
+script directly. `test/cli.bats` drives `main()` end-to-end, including the
+`--dsp` guardrails, against fake `docker`/`devcontainer`/`gh` binaries in
+`test/mocks/` so nothing touches a real container or GitHub. `test/install.bats`
+exercises `make install`/`uninstall` against an isolated temp prefix. None
+of the suite touches this repo's own `.devcontainer/`, `~/.local`, or your
+real git config.
+
+For changes that touch the interactive/autonomous-mode paths (`gh repo
+create`, PAT setup, the live firewall), see
+[`docs/e2e-runbook.md`](docs/e2e-runbook.md): a manual walkthrough that
+creates a real throwaway GitHub repo and exercises the full `--dsp` setup
+flow, since that can't be mocked the way `make test` mocks it.
