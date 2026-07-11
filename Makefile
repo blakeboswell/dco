@@ -21,6 +21,7 @@ install:
 	chmod +x "$(BINDIR)/dco"
 	cp -r templates/. "$(SHAREDIR)/templates/"
 	chmod +x "$(SHAREDIR)/templates/init-firewall.sh"
+	chmod +x "$(SHAREDIR)/templates/autonomous/init-firewall.sh"
 	cp config/allowlist.txt "$(SHAREDIR)/config/"
 	@echo "installed $(BINDIR)/dco (SHAREDIR=$(SHAREDIR))"
 
@@ -30,8 +31,14 @@ uninstall:
 	rm -f "$(BINDIR)/dco"
 	rm -rf "$(SHAREDIR)"
 
+# NOTE: unlike dco.in's own scaffold_devcontainer()/scaffold_named_subconfig()
+# helpers, this target has no non-destructive guard — it always overwrites,
+# including any hand-customized .devcontainer/autonomous/CLAUDE.md in this
+# repo's own dogfooded copy. Recoverable via git (this repo is one), just
+# don't expect it to preserve local edits like the dco.in helpers do.
 regen-devcontainer:
 	mkdir -p .devcontainer
 	cp -r templates/. .devcontainer/
 	cp config/allowlist.txt .devcontainer/allowlist.txt
 	chmod +x .devcontainer/init-firewall.sh
+	chmod +x .devcontainer/autonomous/init-firewall.sh
