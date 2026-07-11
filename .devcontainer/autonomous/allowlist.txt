@@ -1,0 +1,29 @@
+# dco network allowlist for the autonomous profile — one domain per line.
+# Blank lines and lines starting with # are ignored.
+#
+# Unlike the default profile's allowlist (empty = firewall disabled), this
+# one ships populated on purpose: autonomous mode runs Claude with
+# --dangerously-skip-permissions, so the firewall needs to actually be
+# enforcing. GitHub itself is already always-allowed by init-firewall.sh
+# regardless of this file (git/gh need it unconditionally); everything below
+# is what Claude Code and common tooling need on top of that.
+#
+# NOTE: the exact Anthropic API/telemetry domains below are asserted from a
+# known reference firewall pattern, not independently verified against the
+# currently-installed Claude Code version — if you see blocked-connection
+# errors in a real autonomous session, that's the first place to check.
+
+api.anthropic.com
+statsig.anthropic.com
+sentry.io
+
+# npm installs (Node tooling is baked into every dco image)
+registry.npmjs.org
+
+# not covered by init-firewall.sh's GitHub-meta IP fetch (different CDN),
+# but commonly needed for install scripts / raw file fetches
+raw.githubusercontent.com
+
+# uncomment if this project uses Python (the base image ships `uv`)
+# pypi.org
+# files.pythonhosted.org

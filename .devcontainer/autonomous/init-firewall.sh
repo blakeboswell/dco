@@ -1,7 +1,7 @@
 #!/bin/bash
-# NOTE: templates/autonomous/init-firewall.sh is a byte-identical copy of
-# this file (Docker COPY can't follow a symlink outside its build context).
-# If you edit this file, apply the same edit there.
+# NOTE: this is a byte-identical copy of templates/init-firewall.sh (Docker
+# COPY can't follow a symlink outside its build context). If you edit that
+# file, apply the same edit here.
 set -euo pipefail
 IFS=$'\n\t'
 
