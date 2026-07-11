@@ -1,4 +1,4 @@
-# dco network allowlist for the autonomous profile — one domain per line.
+# dco network allowlist for the autonomous profile. One domain per line.
 # Blank lines and lines starting with # are ignored.
 #
 # Unlike the default profile's allowlist (empty = firewall disabled), this
@@ -8,9 +8,14 @@
 # regardless of this file (git/gh need it unconditionally); everything below
 # is what Claude Code and common tooling need on top of that.
 #
+# NOTE: only runtime network calls are affected by this file. Anything
+# apt/npm/pip-installed during the Docker build already happened before the
+# firewall ever turns on (postStartCommand runs after the container starts).
+# This list only matters for things Claude does live during a session.
+#
 # NOTE: the exact Anthropic API/telemetry domains below are asserted from a
 # known reference firewall pattern, not independently verified against the
-# currently-installed Claude Code version — if you see blocked-connection
+# currently-installed Claude Code version. If you see blocked-connection
 # errors in a real autonomous session, that's the first place to check.
 
 api.anthropic.com
@@ -20,10 +25,29 @@ sentry.io
 # npm installs (Node tooling is baked into every dco image)
 registry.npmjs.org
 
-# not covered by init-firewall.sh's GitHub-meta IP fetch (different CDN),
-# but commonly needed for install scripts / raw file fetches
-raw.githubusercontent.com
+# Python installs (the base image ships `uv`)
+pypi.org
+files.pythonhosted.org
 
-# uncomment if this project uses Python (the base image ships `uv`)
-# pypi.org
-# files.pythonhosted.org
+# apt package installs. node:20 is Debian bookworm under the hood, whose
+# main and security repos both resolve to this same host (confirmed against
+# a bookworm apt sources.list, not just asserted). Only needed if Claude
+# runs apt-get live during a session, not for anything baked into the image
+deb.debian.org
+
+# GitHub CDNs not covered by init-firewall.sh's GitHub-meta IP fetch
+# (different infra than github.com/api.github.com's web/api/git ranges):
+# raw file fetches, tarball/zipball downloads, and release asset downloads
+# respectively. All three are common failure points for GitHub-based
+# tooling behind an allowlist firewall.
+raw.githubusercontent.com
+codeload.github.com
+objects.githubusercontent.com
+
+# Rust installs (cargo)
+crates.io
+static.crates.io
+
+# Go installs (go get / go mod)
+proxy.golang.org
+sum.golang.org

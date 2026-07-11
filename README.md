@@ -112,10 +112,13 @@ Setup:
 active entries (the firewall would be a no-op) or if `DCO_GITHUB_TOKEN`
 isn't set.
 
-Review `.devcontainer/autonomous/allowlist.txt` for your project's own needs
-(for example, uncomment the PyPI entries for a Python project) and
-`.devcontainer/autonomous/CLAUDE.md` for the operating instructions Claude
-follows: label taxonomy, the PR workflow, and when to ask versus proceed.
+The shipped allowlist already covers Node, Python, Rust, Go, apt, and the
+common GitHub CDNs that trip up allowlist firewalls (raw file fetches,
+tarball downloads, release assets). Review
+`.devcontainer/autonomous/allowlist.txt` for anything else your project
+needs, and `.devcontainer/autonomous/CLAUDE.md` for the operating
+instructions Claude follows: label taxonomy, the PR workflow, and when to
+ask versus proceed.
 
 ## Git identity
 
