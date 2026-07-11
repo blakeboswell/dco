@@ -36,6 +36,7 @@ dco [path] [sub-config] [flags]
 | `-r`, `--rebuild` | Force rebuild (removes existing container first) |
 | `-s`, `--stop` | Stop and remove the project's container |
 | `-g`, `--regen` | Refresh a project's `.devcontainer/` from the latest templates |
+| `--dsp` | Launch Claude with `--dangerously-skip-permissions` (implies `--claude`, see below) |
 | `-l`, `--list` | List all running devcontainers |
 | `-h`, `--help` | Show help |
 
@@ -60,15 +61,61 @@ persistent; each invocation opens a fresh `devcontainer exec` session.
 
 Separately from the tmux session above, `~/.claude` inside the container
 (Claude's config, memory, and session history) lives on a named Docker
-volume, keyed to the project's path rather than the container itself. That
-means it survives `dco --stop`, `dco --rebuild`, and even deleting and
-recreating the container from scratch. Only removing the Docker volume
-itself would lose it.
+volume, keyed to the project's path and sub-config rather than the container
+itself. That means it survives `dco --stop`, `dco --rebuild`, and even
+deleting and recreating the container from scratch. Only removing the Docker
+volume itself would lose it.
 
 This only applies to projects whose `.devcontainer/` already has the
 `mounts` entries from the current `templates/devcontainer.json`. If a
 project's `.devcontainer/` was scaffolded before this existed, or was
 hand-edited, refresh it with `dco --regen [path]` and then `dco --rebuild`.
+
+## Autonomous mode (`--dsp`)
+
+`dco . autonomous --dsp` runs Claude unattended: no tool-use prompts at all,
+with this repo's GitHub Issues and PRs as its task queue and its way to ask
+you questions. Think of it as directing a team of junior engineers rather
+than pairing on every line.
+
+Running with zero prompts only makes sense alongside a few other things:
+
+1. **A real firewall.** Autonomous mode flips network posture from this
+   tool's normal open-by-default to enforced default-deny, using a populated
+   allowlist instead of the empty one the default profile ships with.
+2. **A scoped credential.** A fine-grained GitHub token limited to the
+   target repo, not your full personal access.
+3. **A PR-only workflow.** Claude opens PRs against issues; a human always
+   merges. That review step is the main "engineer says so" checkpoint.
+4. **A guardrail hook.** Hard-blocks force-push, direct pushes to
+   `main`/`master`, PR self-merge, and repo/branch-protection edits, even
+   under `--dangerously-skip-permissions` (hooks are a separate enforcement
+   layer from the permission system).
+
+Setup:
+
+1. Create a fine-grained GitHub PAT scoped to the target repo only, with
+   Contents / Issues / Pull requests read-write.
+2. Export it on the host, along with your GitHub handle (used for
+   `@mentions` when Claude needs your input):
+   ```sh
+   export DCO_GITHUB_TOKEN=github_pat_...
+   export DCO_GITHUB_HANDLE=yourhandle
+   ```
+3. Enable branch protection on the target repo: require PR review, disallow
+   force-push. This is the real, server-side backstop; the guardrail hook
+   above is a local layer underneath it, not a replacement for it.
+4. `dco . autonomous --dsp`. First run auto-scaffolds
+   `.devcontainer/autonomous/` from the shipped profile.
+
+`dco` refuses to launch `--dsp` if the resolved config's allowlist has no
+active entries (the firewall would be a no-op) or if `DCO_GITHUB_TOKEN`
+isn't set.
+
+Review `.devcontainer/autonomous/allowlist.txt` for your project's own needs
+(for example, uncomment the PyPI entries for a Python project) and
+`.devcontainer/autonomous/CLAUDE.md` for the operating instructions Claude
+follows: label taxonomy, the PR workflow, and when to ask versus proceed.
 
 ## Git identity
 
