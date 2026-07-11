@@ -120,6 +120,14 @@ needs, and `.devcontainer/autonomous/CLAUDE.md` for the operating
 instructions Claude follows: label taxonomy, the PR workflow, and when to
 ask versus proceed.
 
+`allowlist.txt` is bind-mounted read-only into the container, so an edit on
+the host takes effect immediately, without a rebuild: run
+`sudo /usr/local/bin/init-firewall.sh` inside the container to apply it (the
+`node` user already has passwordless sudo scoped to exactly that command).
+Claude can't edit the allowlist itself (the mount is read-only), so a new
+domain always goes through you: it'll ask via a `blocked` issue, and once
+you've added and committed the domain, it reloads the firewall itself.
+
 ## Git identity
 
 Every launch, `dco` reads `git config --global user.name` / `user.email` from
