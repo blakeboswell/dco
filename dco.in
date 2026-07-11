@@ -12,6 +12,7 @@
 #   dco --stop [path]                # stop/remove a project's container
 #   dco --list                       # list running devcontainers
 #   dco --regen [path]               # refresh .devcontainer/ from latest templates
+#   dco . autonomous --dsp           # unattended Claude, GitHub-issue-driven (see README)
 
 set -euo pipefail
 
@@ -35,6 +36,26 @@ scaffold_devcontainer() {
   chmod +x "$dest/init-firewall.sh"
 }
 
+# scaffolds a named sub-config profile (e.g. "autonomous") from
+# $SHAREDIR/templates/<name>/ into <dest>, if such a shipped profile exists.
+# Returns 1 (no die) if no shipped profile by that name exists, so callers
+# can fall back to their own "not found" handling. Substitutes
+# DCO_GITHUB_HANDLE into a scaffolded CLAUDE.md's {{DCO_GITHUB_HANDLE}}
+# placeholder when that env var is set.
+scaffold_named_subconfig() {
+  local name="$1" dest="$2"
+  local src="$SHAREDIR/templates/$name"
+  [[ -d "$src" ]] || return 1
+  mkdir -p "$dest"
+  cp -r "$src/." "$dest/"
+  [[ -f "$dest/init-firewall.sh" ]] && chmod +x "$dest/init-firewall.sh"
+  if [[ -f "$dest/CLAUDE.md" && -n "${DCO_GITHUB_HANDLE:-}" ]]; then
+    sed -i.bak "s/{{DCO_GITHUB_HANDLE}}/${DCO_GITHUB_HANDLE//\//\\/}/g" "$dest/CLAUDE.md"
+    rm -f "$dest/CLAUDE.md.bak"
+  fi
+  return 0
+}
+
 # ── help ─────────────────────────────────────────────────────────────────────
 usage() {
   cat >&2 <<'EOF'
@@ -52,6 +73,7 @@ Flags:
   -r, --rebuild   Force rebuild (removes existing container first)
   -s, --stop      Stop and remove the project's container
   -g, --regen     Refresh a project's .devcontainer/ from the latest templates
+      --dsp       Launch Claude with --dangerously-skip-permissions (implies --claude)
   -l, --list      List all running devcontainers
   -h, --help      Show this help
 
@@ -59,6 +81,11 @@ Flags:
 attaches to an already-running session if one exists, or creates one.
 Detach with Ctrl-b then d — Claude keeps running in the container.
 Rerun `dco --claude` (same project) later to reattach to it.
+
+--dsp runs Claude fully unattended, no tool-use prompts at all. Refuses
+to launch unless the resolved config's allowlist.txt is actually
+enforcing the firewall and DCO_GITHUB_TOKEN is set — see the README's
+Autonomous mode section before using this.
 
 Examples:
   dco                              # shell in CWD's container
@@ -68,6 +95,7 @@ Examples:
   dco --rebuild --claude           # rebuild then launch Claude
   dco --stop ~/projects/trading    # remove that project's container
   dco --regen ~/projects/trading   # refresh that project's .devcontainer/ from templates
+  dco . autonomous --dsp           # unattended Claude, GitHub-issue-driven
   dco --list                       # show all running devcontainers
 
 Shell function (add to .zshrc):
@@ -81,6 +109,7 @@ LAUNCH_CLAUDE=false
 REBUILD=false
 STOP=false
 REGEN=false
+DSP=false
 LIST=false
 POSITIONAL=()
 for arg in "$@"; do
@@ -89,6 +118,7 @@ for arg in "$@"; do
     --rebuild|-r) REBUILD=true ;;
     --stop|-s)    STOP=true ;;
     --regen|-g)   REGEN=true ;;
+    --dsp)        DSP=true; LAUNCH_CLAUDE=true ;;
     --list|-l)    LIST=true ;;
     --help|-h)    usage ;;
     *) POSITIONAL+=("$arg") ;;
@@ -109,17 +139,24 @@ WORKSPACE="$(realpath "$WORKSPACE")"
 
 [[ -d "$WORKSPACE" ]] || die "not a directory: $WORKSPACE"
 
-# unique-per-path id for this project's named volumes (bash-history, Claude
-# config/memory) — derived from the full path, not just the folder name, so
-# two differently-located projects that share a directory name (e.g. two
-# unrelated "api" checkouts) never collide on the same volume
+# unique-per-path-and-sub-config id for this project's named volumes
+# (bash-history, Claude config/memory) — derived from the full path (not
+# just the folder name) plus the sub-config name, so two differently-located
+# projects that share a directory name (e.g. two unrelated "api" checkouts)
+# never collide, and each named sub-config (e.g. "autonomous") for the same
+# project gets its own private volume instead of sharing the default one
 if command -v sha256sum &>/dev/null; then
   WORKSPACE_HASH="$(printf '%s' "$WORKSPACE" | sha256sum | cut -c1-8)"
 else
   WORKSPACE_HASH="$(printf '%s' "$WORKSPACE" | shasum -a 256 | cut -c1-8)"
 fi
 WORKSPACE_SLUG="$(basename "$WORKSPACE" | tr -c 'a-zA-Z0-9_.-' '-')"
-export DCO_PROJECT_ID="${WORKSPACE_SLUG}-${WORKSPACE_HASH}"
+DCO_PROJECT_ID="${WORKSPACE_SLUG}-${WORKSPACE_HASH}"
+if [[ -n "$SUB_CONFIG" ]]; then
+  SUB_CONFIG_SLUG="$(basename "$SUB_CONFIG" | tr -c 'a-zA-Z0-9_.-' '-')"
+  DCO_PROJECT_ID="${DCO_PROJECT_ID}-${SUB_CONFIG_SLUG}"
+fi
+export DCO_PROJECT_ID
 
 # ── stop mode ─────────────────────────────────────────────────────────────────
 if $STOP; then
@@ -156,6 +193,21 @@ fi
 # ── find config ───────────────────────────────────────────────────────────────
 if [[ -n "$SUB_CONFIG" ]]; then
   CONFIG="$WORKSPACE/.devcontainer/$SUB_CONFIG/devcontainer.json"
+  if [[ ! -f "$CONFIG" ]]; then
+    DEST="$WORKSPACE/.devcontainer/$SUB_CONFIG"
+    if scaffold_named_subconfig "$SUB_CONFIG" "$DEST"; then
+      info "no .devcontainer/$SUB_CONFIG found — scaffolded from the shipped '$SUB_CONFIG' profile"
+    else
+      SHIPPED=("$SHAREDIR"/templates/*/)
+      if [[ -d "${SHIPPED[0]:-}" ]]; then
+        NAMES=()
+        for d in "${SHIPPED[@]}"; do NAMES+=("$(basename "$d")"); done
+        die "no .devcontainer/$SUB_CONFIG found, and no shipped profile named '$SUB_CONFIG' exists. Available shipped profiles: ${NAMES[*]}"
+      else
+        die "no .devcontainer/$SUB_CONFIG found, and no shipped named profiles are available"
+      fi
+    fi
+  fi
 elif [[ -f "$WORKSPACE/.devcontainer.json" ]]; then
   CONFIG="$WORKSPACE/.devcontainer.json"
 elif [[ -f "$WORKSPACE/.devcontainer/devcontainer.json" ]]; then
@@ -185,6 +237,25 @@ fi
 [[ -f "$CONFIG" ]] || die "config not found: $CONFIG"
 info "using config: ${CONFIG#"$WORKSPACE/"}"
 
+# ── autonomous-mode guardrails ────────────────────────────────────────────────
+if $DSP; then
+  ALLOWLIST_FILE="$(dirname "$CONFIG")/allowlist.txt"
+  ALLOWLIST_COUNT=0
+  if [[ -f "$ALLOWLIST_FILE" ]]; then
+    ALLOWLIST_COUNT="$(grep -vcE '^[[:space:]]*(#|$)' "$ALLOWLIST_FILE" 2>/dev/null || true)"
+    ALLOWLIST_COUNT="${ALLOWLIST_COUNT:-0}"
+  fi
+  if [[ "$ALLOWLIST_COUNT" -eq 0 ]]; then
+    die "--dsp refuses to launch: $ALLOWLIST_FILE has no active entries, so the
+  container firewall would be a complete no-op — Claude would run with
+  --dangerously-skip-permissions AND unrestricted network egress at the same
+  time. Add at least one domain to that file before retrying."
+  fi
+  [[ -n "${DCO_GITHUB_TOKEN:-}" ]] || die "--dsp refuses to launch: DCO_GITHUB_TOKEN is not set. Autonomous mode
+  is GitHub-issue-driven and needs a fine-grained PAT — see the README's
+  Autonomous mode section for setup."
+fi
+
 # ── ensure devcontainer CLI ───────────────────────────────────────────────────
 if ! command -v devcontainer &>/dev/null; then
   die "@devcontainers/cli not found. Install it with:
@@ -210,21 +281,20 @@ GIT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
 [[ -n "$GIT_EMAIL" ]] && devcontainer exec --workspace-folder "$WORKSPACE" --config "$CONFIG" \
   -- git config --global user.email "$GIT_EMAIL" &>/dev/null
 
-# ── determine shell ───────────────────────────────────────────────────────────
-# prefer zsh, fall back to bash
-SHELL_CMD="zsh"
-devcontainer exec \
-  --workspace-folder "$WORKSPACE" \
-  --config "$CONFIG" \
-  -- bash -c "command -v zsh" &>/dev/null || SHELL_CMD="bash"
-
 # ── exec in ───────────────────────────────────────────────────────────────────
+SHELL_CMD="bash"
+CLAUDE_CMD="claude"
+if $DSP; then
+  CLAUDE_CMD="claude --dangerously-skip-permissions"
+  info "autonomous mode: firewall enforcing, GH_TOKEN set, PR-only workflow, guardrail hook active — launching with --dangerously-skip-permissions"
+fi
+
 if $LAUNCH_CLAUDE; then
   info "attaching to tmux session 'claude' (creating it if needed; detach with Ctrl-b d)..."
   exec devcontainer exec \
     --workspace-folder "$WORKSPACE" \
     --config "$CONFIG" \
-    -- "$SHELL_CMD" -lc "tmux new-session -A -s claude claude"
+    -- "$SHELL_CMD" -lc "tmux new-session -A -s claude $CLAUDE_CMD"
 else
   info "attaching shell ($SHELL_CMD) in /workspace..."
   exec devcontainer exec \
