@@ -2,12 +2,13 @@ PREFIX   ?= $(HOME)/.local
 BINDIR   ?= $(PREFIX)/bin
 SHAREDIR ?= $(PREFIX)/share/dco
 
-.PHONY: install uninstall regen-devcontainer help
+.PHONY: install uninstall regen-devcontainer test help
 
 help:
 	@echo "make install [PREFIX=...]     install dco to \$$(BINDIR), templates+config to \$$(SHAREDIR)"
 	@echo "make uninstall [PREFIX=...]   remove installed dco and \$$(SHAREDIR)"
 	@echo "make regen-devcontainer       regenerate this repo's own .devcontainer/ from templates/"
+	@echo "make test                     run the bats test suite (needs bats: npm install -g bats)"
 
 # Escaped for safe use inside a sed replacement (backslash, &, and the
 # s|...|...| delimiter all need escaping or PREFIX values containing them
@@ -42,3 +43,6 @@ regen-devcontainer:
 	cp config/allowlist.txt .devcontainer/allowlist.txt
 	chmod +x .devcontainer/init-firewall.sh
 	chmod +x .devcontainer/autonomous/init-firewall.sh
+
+test:
+	bats test/

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# fake `docker` for tests — logs every invocation to $MOCK_LOG and returns
+# canned output/exit codes controlled via MOCK_DOCKER_* env vars, so CLI
+# tests can exercise dco's docker-calling code paths without a real daemon
+set -euo pipefail
+
+echo "docker $*" >> "${MOCK_LOG:-/dev/null}"
+
+want_ids=false
+for arg in "$@"; do
+  [[ "$arg" == "-q" || "$arg" == "-aq" ]] && want_ids=true
+done
+
+if $want_ids; then
+  printf '%s\n' "${MOCK_DOCKER_CONTAINER_ID:-}"
+  exit 0
+fi
+
+case "$1" in
+  ps)
+    echo "NAMES  STATUS  FOLDER"
+    ;;
+  rm)
+    exit "${MOCK_DOCKER_RM_EXIT:-0}"
+    ;;
+esac
+exit 0

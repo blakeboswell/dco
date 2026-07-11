@@ -82,6 +82,14 @@ github_owner_repo() {
 # (token names/descriptions) — not a general-purpose URL encoder
 url_encode() { printf '%s' "${1// /+}"; }
 
+# replaces every character of $1 outside the $2 character class with '-'.
+# Deliberately takes a plain string rather than piping a command's output
+# through `tr -c ... '-'`: tr -c also complements the trailing newline that
+# command output carries mid-pipe, turning it into a literal '-' before the
+# outer $(...) ever gets a chance to strip it — always leave any command
+# substitution ($(...)) on the outside of this call, never the inside.
+slugify() { printf '%s' "${1//[^$2]/-}"; }
+
 # opens a URL in the host's default browser if a known opener exists;
 # silently does nothing otherwise (the caller already printed the URL)
 open_url() {
@@ -90,6 +98,27 @@ open_url() {
   elif command -v xdg-open &>/dev/null; then
     xdg-open "$1" &>/dev/null &
   fi
+}
+
+# unique-per-path-and-sub-config id for a project's named volumes
+# (bash-history, Claude config/memory) — derived from the full path (not
+# just the folder name) plus the sub-config name, so two differently-located
+# projects that share a directory name (e.g. two unrelated "api" checkouts)
+# never collide, and each named sub-config (e.g. "autonomous") for the same
+# project gets its own private volume instead of sharing the default one
+project_id() {
+  local workspace="$1" sub_config="${2:-}" hash slug id
+  if command -v sha256sum &>/dev/null; then
+    hash="$(printf '%s' "$workspace" | sha256sum | cut -c1-8)"
+  else
+    hash="$(printf '%s' "$workspace" | shasum -a 256 | cut -c1-8)"
+  fi
+  slug="$(slugify "$(basename "$workspace")" 'a-zA-Z0-9_.-')"
+  id="${slug}-${hash}"
+  if [[ -n "$sub_config" ]]; then
+    id="${id}-$(slugify "$(basename "$sub_config")" 'a-zA-Z0-9_.-')"
+  fi
+  printf '%s' "$id"
 }
 
 # ── help ─────────────────────────────────────────────────────────────────────
@@ -142,6 +171,14 @@ EOF
   exit 0
 }
 
+# wraps everything below so the script can be sourced (e.g. by the test
+# suite) without running any of it — see the sourcing guard at the bottom.
+# Re-asserts strict mode in case main() is invoked after sourcing reset it
+# (the test suite's source_dco helper does this on purpose, to avoid
+# leaking set -euo pipefail into the rest of the test process).
+main() {
+set -euo pipefail
+
 # ── args ─────────────────────────────────────────────────────────────────────
 LAUNCH_CLAUDE=false
 REBUILD=false
@@ -177,23 +214,7 @@ WORKSPACE="$(realpath "$WORKSPACE")"
 
 [[ -d "$WORKSPACE" ]] || die "not a directory: $WORKSPACE"
 
-# unique-per-path-and-sub-config id for this project's named volumes
-# (bash-history, Claude config/memory) — derived from the full path (not
-# just the folder name) plus the sub-config name, so two differently-located
-# projects that share a directory name (e.g. two unrelated "api" checkouts)
-# never collide, and each named sub-config (e.g. "autonomous") for the same
-# project gets its own private volume instead of sharing the default one
-if command -v sha256sum &>/dev/null; then
-  WORKSPACE_HASH="$(printf '%s' "$WORKSPACE" | sha256sum | cut -c1-8)"
-else
-  WORKSPACE_HASH="$(printf '%s' "$WORKSPACE" | shasum -a 256 | cut -c1-8)"
-fi
-WORKSPACE_SLUG="$(basename "$WORKSPACE" | tr -c 'a-zA-Z0-9_.-' '-')"
-DCO_PROJECT_ID="${WORKSPACE_SLUG}-${WORKSPACE_HASH}"
-if [[ -n "$SUB_CONFIG" ]]; then
-  SUB_CONFIG_SLUG="$(basename "$SUB_CONFIG" | tr -c 'a-zA-Z0-9_.-' '-')"
-  DCO_PROJECT_ID="${DCO_PROJECT_ID}-${SUB_CONFIG_SLUG}"
-fi
+DCO_PROJECT_ID="$(project_id "$WORKSPACE" "$SUB_CONFIG")"
 export DCO_PROJECT_ID
 
 # ── stop mode ─────────────────────────────────────────────────────────────────
@@ -283,7 +304,7 @@ if $DSP; then
 
   if ! git -C "$WORKSPACE" remote -v 2>/dev/null | grep -q 'github\.com'; then
     if [[ -t 0 ]] && command -v gh &>/dev/null; then
-      REPO_NAME="$(basename "$WORKSPACE" | tr -c 'a-zA-Z0-9._-' '-')"
+      REPO_NAME="$(slugify "$(basename "$WORKSPACE")" 'a-zA-Z0-9._-')"
       info "no GitHub remote found for $WORKSPACE."
       REPLY=""
       read -r -p "dco: create a private GitHub repo '$REPO_NAME' and push? [gh repo create $REPO_NAME --private --source=\"$WORKSPACE\" --remote=origin --push] [y/N] " REPLY || true
@@ -326,7 +347,7 @@ if $DSP; then
     if [[ -t 0 ]]; then
       info "DCO_GITHUB_TOKEN is not set. Let's set one up."
       OWNER_REPO="$(github_owner_repo "$WORKSPACE" || true)"
-      TOKEN_NAME="dco-autonomous-$(basename "$WORKSPACE" | tr -c 'a-zA-Z0-9-' '-')"
+      TOKEN_NAME="dco-autonomous-$(slugify "$(basename "$WORKSPACE")" 'a-zA-Z0-9-')"
       TOKEN_DESC="dco autonomous mode${OWNER_REPO:+ for $OWNER_REPO}"
       PAT_URL="https://github.com/settings/personal-access-tokens/new?name=$(url_encode "$TOKEN_NAME")&description=$(url_encode "$TOKEN_DESC")&expires_in=90&contents=write&issues=write&pull_requests=write"
       info "opening a pre-filled token-creation page (pick just this repo, then Generate token):"
@@ -411,4 +432,13 @@ else
     --workspace-folder "$WORKSPACE" \
     --config "$CONFIG" \
     -- "$SHELL_CMD" -l
+fi
+
+}
+
+# only run main when executed directly (e.g. as the installed $BINDIR/dco);
+# a plain `source dco.in` (as the test suite does) just defines the
+# functions above and returns, so tests can call them individually
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
 fi

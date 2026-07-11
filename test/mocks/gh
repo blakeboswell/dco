@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# fake `gh` CLI for tests — logs every invocation and answers the two
+# subcommands dco actually shells out to, controlled via MOCK_GH_* env vars
+set -euo pipefail
+
+echo "gh $*" >> "${MOCK_LOG:-/dev/null}"
+
+case "$1 $2" in
+  "repo create")
+    exit "${MOCK_GH_REPO_CREATE_EXIT:-0}"
+    ;;
+  "api user")
+    [[ -n "${MOCK_GH_HANDLE:-}" ]] && printf '%s\n' "${MOCK_GH_HANDLE}"
+    exit "${MOCK_GH_API_EXIT:-0}"
+    ;;
+esac
+exit 0

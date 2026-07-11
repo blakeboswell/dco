@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# fake `devcontainer` CLI for tests — logs every invocation and exits
+# MOCK_DEVCONTAINER_EXIT (default 0), so CLI tests can assert dco built the
+# right `devcontainer up`/`exec` command line without needing Docker
+set -euo pipefail
+
+echo "devcontainer $*" >> "${MOCK_LOG:-/dev/null}"
+exit "${MOCK_DEVCONTAINER_EXIT:-0}"
