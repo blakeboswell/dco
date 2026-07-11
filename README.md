@@ -35,6 +35,7 @@ dco [path] [sub-config] [flags]
 | `-c`, `--claude` | Launch Claude Code in a persistent tmux session (see below) |
 | `-r`, `--rebuild` | Force rebuild (removes existing container first) |
 | `-s`, `--stop` | Stop and remove the project's container |
+| `-g`, `--regen` | Refresh a project's `.devcontainer/` from the latest templates |
 | `-l`, `--list` | List all running devcontainers |
 | `-h`, `--help` | Show help |
 
@@ -54,6 +55,20 @@ you can step out and come back later without losing the conversation:
 This only works while the container itself stays up — don't run `dco --stop`
 or restart Docker in between. Plain `dco` shells (without `--claude`) are not
 persistent; each invocation opens a fresh `devcontainer exec` session.
+
+## Claude's memory across container rebuilds
+
+Separately from the tmux session above, `~/.claude` inside the container
+(Claude's config, memory, and session history) lives on a named Docker
+volume, keyed to the project's path rather than the container itself. That
+means it survives `dco --stop`, `dco --rebuild`, and even deleting and
+recreating the container from scratch — only removing the Docker volume
+itself would lose it.
+
+This only applies to projects whose `.devcontainer/` already has the
+`mounts` entries from the current `templates/devcontainer.json`. If a
+project's `.devcontainer/` was scaffolded before this existed, or was
+hand-edited, refresh it with `dco --regen [path]` and then `dco --rebuild`.
 
 ## Git identity
 

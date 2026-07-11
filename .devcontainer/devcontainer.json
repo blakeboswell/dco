@@ -40,8 +40,8 @@
   },
   "remoteUser": "node",
   "mounts": [
-    "source=claude-code-bashhistory-${localWorkspaceFolderBasename},target=/commandhistory,type=volume",
-    "source=claude-code-config-${localWorkspaceFolderBasename},target=/home/node/.claude,type=volume"
+    "source=claude-code-bashhistory-${localEnv:DCO_PROJECT_ID:default},target=/commandhistory,type=volume",
+    "source=claude-code-config-${localEnv:DCO_PROJECT_ID:default},target=/home/node/.claude,type=volume"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",

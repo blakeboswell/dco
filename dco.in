@@ -11,6 +11,7 @@
 #   dco --rebuild                    # force rebuild before attaching
 #   dco --stop [path]                # stop/remove a project's container
 #   dco --list                       # list running devcontainers
+#   dco --regen [path]               # refresh .devcontainer/ from latest templates
 
 set -euo pipefail
 
@@ -19,6 +20,20 @@ SHAREDIR="@SHAREDIR@"
 # ── helpers ──────────────────────────────────────────────────────────────────
 die()  { echo "dco: error: $*" >&2; exit 1; }
 info() { echo "dco: $*" >&2; }
+
+# copies the latest templates/+config/ into <dest>, overwriting any
+# top-level files but leaving named sub-configs (<dest>/<name>/) alone
+scaffold_devcontainer() {
+  local dest="$1"
+  [[ -d "$SHAREDIR/templates" ]] || \
+    die "template dir not found: $SHAREDIR/templates — run 'make install', don't execute dco.in directly"
+  [[ -f "$SHAREDIR/config/allowlist.txt" ]] || \
+    die "config not found: $SHAREDIR/config/allowlist.txt — run 'make install', don't execute dco.in directly"
+  mkdir -p "$dest"
+  cp -r "$SHAREDIR/templates/." "$dest/"
+  cp "$SHAREDIR/config/allowlist.txt" "$dest/allowlist.txt"
+  chmod +x "$dest/init-firewall.sh"
+}
 
 # ── help ─────────────────────────────────────────────────────────────────────
 usage() {
@@ -36,6 +51,7 @@ Flags:
   -c, --claude    Launch Claude Code in a persistent tmux session ('claude')
   -r, --rebuild   Force rebuild (removes existing container first)
   -s, --stop      Stop and remove the project's container
+  -g, --regen     Refresh a project's .devcontainer/ from the latest templates
   -l, --list      List all running devcontainers
   -h, --help      Show this help
 
@@ -51,6 +67,7 @@ Examples:
   dco --claude                     # attach/create tmux session running Claude
   dco --rebuild --claude           # rebuild then launch Claude
   dco --stop ~/projects/trading    # remove that project's container
+  dco --regen ~/projects/trading   # refresh that project's .devcontainer/ from templates
   dco --list                       # show all running devcontainers
 
 Shell function (add to .zshrc):
@@ -63,6 +80,7 @@ EOF
 LAUNCH_CLAUDE=false
 REBUILD=false
 STOP=false
+REGEN=false
 LIST=false
 POSITIONAL=()
 for arg in "$@"; do
@@ -70,6 +88,7 @@ for arg in "$@"; do
     --claude|-c)  LAUNCH_CLAUDE=true ;;
     --rebuild|-r) REBUILD=true ;;
     --stop|-s)    STOP=true ;;
+    --regen|-g)   REGEN=true ;;
     --list|-l)    LIST=true ;;
     --help|-h)    usage ;;
     *) POSITIONAL+=("$arg") ;;
@@ -90,6 +109,18 @@ WORKSPACE="$(realpath "$WORKSPACE")"
 
 [[ -d "$WORKSPACE" ]] || die "not a directory: $WORKSPACE"
 
+# unique-per-path id for this project's named volumes (bash-history, Claude
+# config/memory) — derived from the full path, not just the folder name, so
+# two differently-located projects that share a directory name (e.g. two
+# unrelated "api" checkouts) never collide on the same volume
+if command -v sha256sum &>/dev/null; then
+  WORKSPACE_HASH="$(printf '%s' "$WORKSPACE" | sha256sum | cut -c1-8)"
+else
+  WORKSPACE_HASH="$(printf '%s' "$WORKSPACE" | shasum -a 256 | cut -c1-8)"
+fi
+WORKSPACE_SLUG="$(basename "$WORKSPACE" | tr -c 'a-zA-Z0-9_.-' '-')"
+export DCO_PROJECT_ID="${WORKSPACE_SLUG}-${WORKSPACE_HASH}"
+
 # ── stop mode ─────────────────────────────────────────────────────────────────
 if $STOP; then
   CONTAINER=$(docker ps -q --filter "label=devcontainer.local_folder=$WORKSPACE")
@@ -101,6 +132,24 @@ if $STOP; then
   info "removing container for $WORKSPACE ..."
   docker rm -f "$CONTAINER"
   info "done."
+  exit 0
+fi
+
+# ── regen mode ────────────────────────────────────────────────────────────────
+if $REGEN; then
+  DEST="$WORKSPACE/.devcontainer"
+  if [[ -d "$DEST" ]]; then
+    info "regenerating $DEST from $SHAREDIR/templates ..."
+    if [[ -d "$WORKSPACE/.git" ]]; then
+      info "(git repo detected — run 'git diff .devcontainer' after to review changes)"
+    else
+      info "warning: $WORKSPACE is not a git repo — existing .devcontainer/ files will be overwritten with no backup"
+    fi
+  else
+    info "no existing .devcontainer/ — creating one in $WORKSPACE"
+  fi
+  scaffold_devcontainer "$DEST"
+  info "done. Named sub-configs under .devcontainer/<name>/ are untouched. Run 'dco --rebuild' to apply."
   exit 0
 fi
 
@@ -125,16 +174,8 @@ else
     exit 1
   else
     info "no devcontainer.json found — creating default .devcontainer in $WORKSPACE"
-    [[ -d "$SHAREDIR/templates" ]] || \
-      die "template dir not found: $SHAREDIR/templates — run 'make install', don't execute dco.in directly"
-    [[ -f "$SHAREDIR/config/allowlist.txt" ]] || \
-      die "config not found: $SHAREDIR/config/allowlist.txt — run 'make install', don't execute dco.in directly"
-
     DEST="$WORKSPACE/.devcontainer"
-    mkdir -p "$DEST"
-    cp -r "$SHAREDIR/templates/." "$DEST/"
-    cp "$SHAREDIR/config/allowlist.txt" "$DEST/allowlist.txt"
-    chmod +x "$DEST/init-firewall.sh"
+    scaffold_devcontainer "$DEST"
 
     CONFIG="$DEST/devcontainer.json"
     info "created $CONFIG (Claude Code Sandbox)"
