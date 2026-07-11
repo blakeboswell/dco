@@ -39,9 +39,7 @@ scaffold_devcontainer() {
 # scaffolds a named sub-config profile (e.g. "autonomous") from
 # $SHAREDIR/templates/<name>/ into <dest>, if such a shipped profile exists.
 # Returns 1 (no die) if no shipped profile by that name exists, so callers
-# can fall back to their own "not found" handling. Substitutes
-# DCO_GITHUB_HANDLE into a scaffolded CLAUDE.md's {{DCO_GITHUB_HANDLE}}
-# placeholder when that env var is set.
+# can fall back to their own "not found" handling.
 scaffold_named_subconfig() {
   local name="$1" dest="$2"
   local src="$SHAREDIR/templates/$name"
@@ -49,11 +47,49 @@ scaffold_named_subconfig() {
   mkdir -p "$dest"
   cp -r "$src/." "$dest/"
   [[ -f "$dest/init-firewall.sh" ]] && chmod +x "$dest/init-firewall.sh"
-  if [[ -f "$dest/CLAUDE.md" && -n "${DCO_GITHUB_HANDLE:-}" ]]; then
-    sed -i.bak "s/{{DCO_GITHUB_HANDLE}}/${DCO_GITHUB_HANDLE//\//\\/}/g" "$dest/CLAUDE.md"
-    rm -f "$dest/CLAUDE.md.bak"
-  fi
+  substitute_github_handle "$dest/CLAUDE.md"
   return 0
+}
+
+# substitutes DCO_GITHUB_HANDLE into a CLAUDE.md's {{DCO_GITHUB_HANDLE}}
+# placeholder, if the file exists, the var is set, and the placeholder is
+# still present. No-op otherwise (safe to call speculatively).
+substitute_github_handle() {
+  local file="$1"
+  [[ -f "$file" && -n "${DCO_GITHUB_HANDLE:-}" ]] || return 0
+  grep -q '{{DCO_GITHUB_HANDLE}}' "$file" || return 0
+  sed -i.bak "s/{{DCO_GITHUB_HANDLE}}/${DCO_GITHUB_HANDLE//\//\\/}/g" "$file"
+  rm -f "$file.bak"
+}
+
+# best-effort "owner/repo" from a git repo's github.com "origin" remote,
+# for building a friendly token name/description. Empty output (not a die)
+# if there's no such remote; callers treat this as optional context.
+github_owner_repo() {
+  local dir="$1" remote_url
+  remote_url="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"
+  [[ -n "$remote_url" ]] || return 1
+  remote_url="${remote_url%.git}"
+  case "$remote_url" in
+    git@github.com:*)       echo "${remote_url#git@github.com:}" ;;
+    ssh://git@github.com/*) echo "${remote_url#ssh://git@github.com/}" ;;
+    https://github.com/*)   echo "${remote_url#https://github.com/}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# minimal encoding for the plain identifier strings we build ourselves
+# (token names/descriptions) — not a general-purpose URL encoder
+url_encode() { printf '%s' "${1// /+}"; }
+
+# opens a URL in the host's default browser if a known opener exists;
+# silently does nothing otherwise (the caller already printed the URL)
+open_url() {
+  if command -v open &>/dev/null; then
+    open "$1" &>/dev/null &
+  elif command -v xdg-open &>/dev/null; then
+    xdg-open "$1" &>/dev/null &
+  fi
 }
 
 # ── help ─────────────────────────────────────────────────────────────────────
@@ -83,9 +119,11 @@ Detach with Ctrl-b then d — Claude keeps running in the container.
 Rerun `dco --claude` (same project) later to reattach to it.
 
 --dsp runs Claude fully unattended, no tool-use prompts at all. Refuses
-to launch unless the resolved config's allowlist.txt is actually
-enforcing the firewall and DCO_GITHUB_TOKEN is set — see the README's
-Autonomous mode section before using this.
+to launch unless the workspace is a git repo with a GitHub remote, the
+resolved config's allowlist.txt is actually enforcing the firewall, and
+DCO_GITHUB_TOKEN is set. Run from a real terminal, it'll offer to create
+the GitHub repo (via `gh`) and walk you through generating a token if
+either is missing; see the README's Autonomous mode section for details.
 
 Examples:
   dco                              # shell in CWD's container
@@ -239,6 +277,30 @@ info "using config: ${CONFIG#"$WORKSPACE/"}"
 
 # ── autonomous-mode guardrails ────────────────────────────────────────────────
 if $DSP; then
+  [[ -d "$WORKSPACE/.git" ]] || die "--dsp needs $WORKSPACE to already be a git repo (run
+  'git init' and make an initial commit first) — autonomous mode's whole
+  workflow is git/GitHub-issue-driven."
+
+  if ! git -C "$WORKSPACE" remote -v 2>/dev/null | grep -q 'github\.com'; then
+    if [[ -t 0 ]] && command -v gh &>/dev/null; then
+      REPO_NAME="$(basename "$WORKSPACE" | tr -c 'a-zA-Z0-9._-' '-')"
+      info "no GitHub remote found for $WORKSPACE."
+      REPLY=""
+      read -r -p "dco: create a private GitHub repo '$REPO_NAME' and push? [gh repo create $REPO_NAME --private --source=\"$WORKSPACE\" --remote=origin --push] [y/N] " REPLY || true
+      if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+        gh repo create "$REPO_NAME" --private --source="$WORKSPACE" --remote=origin --push \
+          || die "gh repo create failed; create the GitHub repo yourself and retry."
+        info "created and pushed: $REPO_NAME"
+      else
+        die "--dsp needs a GitHub remote to work against; aborting."
+      fi
+    else
+      die "--dsp refuses to launch: $WORKSPACE has no GitHub remote, and this is either
+  non-interactive or 'gh' isn't installed on the host. Create the repo
+  yourself (gh repo create --source=. --remote=origin --push) and retry."
+    fi
+  fi
+
   ALLOWLIST_FILE="$(dirname "$CONFIG")/allowlist.txt"
   ALLOWLIST_COUNT=0
   if [[ -f "$ALLOWLIST_FILE" ]]; then
@@ -251,9 +313,57 @@ if $DSP; then
   --dangerously-skip-permissions AND unrestricted network egress at the same
   time. Add at least one domain to that file before retrying."
   fi
-  [[ -n "${DCO_GITHUB_TOKEN:-}" ]] || die "--dsp refuses to launch: DCO_GITHUB_TOKEN is not set. Autonomous mode
+
+  ENV_FILE="$(dirname "$CONFIG")/.env.local"
+  if [[ -z "${DCO_GITHUB_TOKEN:-}" && -f "$ENV_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+  fi
+
+  if [[ -z "${DCO_GITHUB_TOKEN:-}" ]]; then
+    if [[ -t 0 ]]; then
+      info "DCO_GITHUB_TOKEN is not set. Let's set one up."
+      OWNER_REPO="$(github_owner_repo "$WORKSPACE" || true)"
+      TOKEN_NAME="dco-autonomous-$(basename "$WORKSPACE" | tr -c 'a-zA-Z0-9-' '-')"
+      TOKEN_DESC="dco autonomous mode${OWNER_REPO:+ for $OWNER_REPO}"
+      PAT_URL="https://github.com/settings/personal-access-tokens/new?name=$(url_encode "$TOKEN_NAME")&description=$(url_encode "$TOKEN_DESC")&expires_in=90&contents=write&issues=write&pull_requests=write"
+      info "opening a pre-filled token-creation page (pick just this repo, then Generate token):"
+      info "  $PAT_URL"
+      open_url "$PAT_URL"
+      DCO_GITHUB_TOKEN=""
+      read -r -s -p "dco: paste the generated token here (input hidden): " DCO_GITHUB_TOKEN || true
+      echo >&2
+      [[ -n "$DCO_GITHUB_TOKEN" ]] || die "no token entered; aborting."
+      export DCO_GITHUB_TOKEN
+
+      if [[ -z "${DCO_GITHUB_HANDLE:-}" ]]; then
+        SUGGESTED_HANDLE=""
+        command -v gh &>/dev/null && SUGGESTED_HANDLE="$(gh api user --jq .login 2>/dev/null || true)"
+        HANDLE_INPUT=""
+        read -r -p "dco: your GitHub handle for @mentions${SUGGESTED_HANDLE:+ [$SUGGESTED_HANDLE]}: " HANDLE_INPUT || true
+        DCO_GITHUB_HANDLE="${HANDLE_INPUT:-$SUGGESTED_HANDLE}"
+        [[ -n "$DCO_GITHUB_HANDLE" ]] && export DCO_GITHUB_HANDLE
+      fi
+
+      {
+        echo "DCO_GITHUB_TOKEN=$DCO_GITHUB_TOKEN"
+        [[ -n "${DCO_GITHUB_HANDLE:-}" ]] && echo "DCO_GITHUB_HANDLE=$DCO_GITHUB_HANDLE"
+      } > "$ENV_FILE"
+      chmod 600 "$ENV_FILE"
+
+      GITIGNORE_FILE="$(dirname "$ENV_FILE")/.gitignore"
+      grep -qxF ".env.local" "$GITIGNORE_FILE" 2>/dev/null || echo ".env.local" >> "$GITIGNORE_FILE"
+      info "saved to $ENV_FILE (chmod 600, gitignored via $GITIGNORE_FILE) — future launches won't ask again."
+
+      substitute_github_handle "$(dirname "$CONFIG")/CLAUDE.md"
+    else
+      die "--dsp refuses to launch: DCO_GITHUB_TOKEN is not set. Autonomous mode
   is GitHub-issue-driven and needs a fine-grained PAT — see the README's
   Autonomous mode section for setup."
+    fi
+  fi
 fi
 
 # ── ensure devcontainer CLI ───────────────────────────────────────────────────

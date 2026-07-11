@@ -94,23 +94,39 @@ Running with zero prompts only makes sense alongside a few other things:
 
 Setup:
 
-1. Create a fine-grained GitHub PAT scoped to the target repo only, with
-   Contents / Issues / Pull requests read-write.
-2. Export it on the host, along with your GitHub handle (used for
-   `@mentions` when Claude needs your input):
-   ```sh
-   export DCO_GITHUB_TOKEN=github_pat_...
-   export DCO_GITHUB_HANDLE=yourhandle
-   ```
-3. Enable branch protection on the target repo: require PR review, disallow
+1. Enable branch protection on the target repo: require PR review, disallow
    force-push. This is the real, server-side backstop; the guardrail hook
-   above is a local layer underneath it, not a replacement for it.
-4. `dco . autonomous --dsp`. First run auto-scaffolds
-   `.devcontainer/autonomous/` from the shipped profile.
+   above is a local layer underneath it, not a replacement for it. This one
+   step isn't automatable and has to happen on GitHub itself.
+2. `dco . autonomous --dsp`.
 
-`dco` refuses to launch `--dsp` if the resolved config's allowlist has no
-active entries (the firewall would be a no-op) or if `DCO_GITHUB_TOKEN`
-isn't set.
+Everything else, `dco` handles for you when run from a real terminal:
+
+- If the workspace has no GitHub remote, it offers to run
+  `gh repo create --private --source=. --remote=origin --push` using
+  whatever `gh` auth is already on your host (a separate credential from the
+  token below, so this doesn't widen the container's own access).
+- If `DCO_GITHUB_TOKEN` isn't set, it opens a pre-filled fine-grained token
+  creation page (name, description, expiration, and exactly the
+  Contents/Issues/Pull-requests-write permissions needed already filled in;
+  you still pick the specific repo and click Generate, since a URL alone
+  shouldn't be able to grant that), prompts you to paste the result back in,
+  and asks for your GitHub handle (used for `@mentions`, defaulting to
+  whatever `gh` already knows about you).
+- Both get saved to a gitignored `.env.local` next to the scaffolded
+  profile (`chmod 600`), so this only happens once per project.
+
+None of this happens non-interactively: without a terminal to prompt in,
+`dco` still just fails fast with instructions, the same as before. You can
+also always do either step manually. To set the token yourself:
+```sh
+export DCO_GITHUB_TOKEN=github_pat_...
+export DCO_GITHUB_HANDLE=yourhandle
+```
+
+`dco` refuses to launch `--dsp` if the workspace isn't a git repo with a
+GitHub remote, if the resolved config's allowlist has no active entries
+(the firewall would be a no-op), or if `DCO_GITHUB_TOKEN` isn't set.
 
 The shipped allowlist already covers Node, Python, Rust, Go, apt, and the
 common GitHub CDNs that trip up allowlist firewalls (raw file fetches,
