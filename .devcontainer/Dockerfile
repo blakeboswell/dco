@@ -11,8 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   git \
   procps \
   sudo \
-  fzf \
-  zsh \
   tmux \
   man-db \
   unzip \
@@ -51,12 +49,6 @@ RUN mkdir -p /workspace /home/node/.claude && \
 
 WORKDIR /workspace
 
-ARG GIT_DELTA_VERSION=0.18.2
-RUN ARCH=$(dpkg --print-architecture) && \
-  wget "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  sudo dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
-  rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
-
 # Set up non-root user
 USER node
 
@@ -67,41 +59,9 @@ ENV PATH=/home/node/.local/bin:$PATH:/usr/local/share/npm-global/bin
 # Install uv (runs as node user so it lands in /home/node/.local/bin)
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Set the default shell to zsh rather than sh
-ENV SHELL=/bin/zsh
-
 # Set the default editor and visual
 ENV EDITOR=nano
 ENV VISUAL=nano
-
-# Default powerline10k theme
-ARG ZSH_IN_DOCKER_VERSION=1.2.0
-# Retry with a timeout: the installer clones oh-my-zsh from GitHub and
-# occasionally hangs on flaky networks with no timeout of its own.
-RUN success=false; \
-  for i in 1 2 3; do \
-    echo "Installing oh-my-zsh + plugins (attempt $i/3)..."; \
-    if timeout 180 sh -c "$(wget --timeout=30 --tries=3 -O- https://github.com/deluan/zsh-in-docker/releases/download/v${ZSH_IN_DOCKER_VERSION}/zsh-in-docker.sh)" -- \
-      -p git \
-      -p fzf \
-      -p zsh-autosuggestions \
-      -p zsh-syntax-highlighting \
-      -a "source /usr/share/doc/fzf/examples/key-bindings.zsh" \
-      -a "source /usr/share/doc/fzf/examples/completion.zsh" \
-      -a "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
-      -a "typeset -g POWERLEVEL9K_INSTANT_PROMPT=quiet" \
-      -x; then \
-      success=true; break; \
-    fi; \
-    echo "attempt $i failed or timed out; cleaning up and retrying..."; \
-    rm -rf "$HOME/.oh-my-zsh"; \
-    sleep 5; \
-  done; \
-  $success
-
-# Install oh-my-zsh community plugins
-RUN git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions && \
-  git clone https://github.com/zsh-users/zsh-syntax-highlighting ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
 
 # Install Claude
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
