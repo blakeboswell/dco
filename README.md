@@ -35,6 +35,7 @@ dco [path] [sub-config] [flags]
 | `-c`, `--claude` | Launch Claude Code in a persistent tmux session (see below) |
 | `-r`, `--rebuild` | Force rebuild (removes existing container first) |
 | `-s`, `--stop` | Stop and remove the project's container |
+| `--purge` | Like `--stop`, but also deletes its volumes (bash history, Claude's memory) — irreversible, always confirms first |
 | `-g`, `--regen` | Refresh a project's `.devcontainer/` from the latest templates |
 | `--dsp` | Launch Claude with `--dangerously-skip-permissions` (implies `--claude`, see below) |
 | `-l`, `--list` | List all running devcontainers |
@@ -64,7 +65,8 @@ Separately from the tmux session above, `~/.claude` inside the container
 volume, keyed to the project's path and sub-config rather than the container
 itself. That means it survives `dco --stop`, `dco --rebuild`, and even
 deleting and recreating the container from scratch. Only removing the Docker
-volume itself would lose it.
+volume itself would lose it: `dco --purge [path]` does exactly that,
+deliberately, with a confirmation prompt first.
 
 This only applies to projects whose `.devcontainer/` already has the
 `mounts` entries from the current `templates/devcontainer.json`. If a

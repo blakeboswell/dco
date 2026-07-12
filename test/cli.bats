@@ -47,6 +47,47 @@ setup() {
   mock_called_with "docker rm -f abc123"
 }
 
+# ── purge mode ────────────────────────────────────────────────────────────
+
+@test "--purge exits cleanly with nothing to do when no container or volumes exist" {
+  run main "$WS" --purge < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to purge"* ]]
+}
+
+@test "--purge removes the container and both named volumes when confirmed" {
+  id="$(project_id "$WS")"
+  MOCK_DOCKER_CONTAINER_ID="abc123" \
+    MOCK_DOCKER_VOLUMES="claude-code-bashhistory-$id claude-code-config-$id" \
+    run main "$WS" --purge <<< "y"
+  [ "$status" -eq 0 ]
+  mock_called_with "docker rm -f abc123"
+  mock_called_with "docker volume rm claude-code-bashhistory-$id"
+  mock_called_with "docker volume rm claude-code-config-$id"
+}
+
+@test "--purge aborts and removes nothing without confirmation" {
+  id="$(project_id "$WS")"
+  MOCK_DOCKER_CONTAINER_ID="abc123" \
+    MOCK_DOCKER_VOLUMES="claude-code-bashhistory-$id claude-code-config-$id" \
+    run main "$WS" --purge <<< "n"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"purge aborted"* ]]
+  ! mock_called_with "docker rm -f abc123"
+  ! mock_called_with "docker volume rm"
+}
+
+@test "--purge only removes what actually exists (volume already gone)" {
+  id="$(project_id "$WS")"
+  MOCK_DOCKER_CONTAINER_ID="abc123" \
+    MOCK_DOCKER_VOLUMES="claude-code-config-$id" \
+    run main "$WS" --purge <<< "y"
+  [ "$status" -eq 0 ]
+  mock_called_with "docker rm -f abc123"
+  mock_called_with "docker volume rm claude-code-config-$id"
+  ! mock_called_with "docker volume rm claude-code-bashhistory-$id"
+}
+
 # ── config resolution / scaffolding ───────────────────────────────────────
 
 @test "auto-scaffolds a default .devcontainer when none exists, then brings it up" {

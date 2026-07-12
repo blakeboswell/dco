@@ -6,22 +6,35 @@ set -euo pipefail
 
 echo "docker $*" >> "${MOCK_LOG:-/dev/null}"
 
-want_ids=false
-for arg in "$@"; do
-  [[ "$arg" == "-q" || "$arg" == "-aq" ]] && want_ids=true
-done
-
-if $want_ids; then
-  printf '%s\n' "${MOCK_DOCKER_CONTAINER_ID:-}"
+if [[ "$1" == "ps" ]]; then
+  for arg in "$@"; do
+    if [[ "$arg" == "-q" || "$arg" == "-aq" ]]; then
+      printf '%s\n' "${MOCK_DOCKER_CONTAINER_ID:-}"
+      exit 0
+    fi
+  done
+  echo "NAMES  STATUS  FOLDER"
   exit 0
 fi
 
-case "$1" in
-  ps)
-    echo "NAMES  STATUS  FOLDER"
-    ;;
-  rm)
-    exit "${MOCK_DOCKER_RM_EXIT:-0}"
-    ;;
-esac
+if [[ "$1" == "rm" ]]; then
+  exit "${MOCK_DOCKER_RM_EXIT:-0}"
+fi
+
+if [[ "$1" == "volume" ]]; then
+  case "$2" in
+    inspect)
+      # MOCK_DOCKER_VOLUMES is a space-separated list of volume names that
+      # "exist" for this test; anything else behaves like a real miss (exit 1)
+      for v in ${MOCK_DOCKER_VOLUMES:-}; do
+        [[ "$v" == "$3" ]] && exit 0
+      done
+      exit 1
+      ;;
+    rm)
+      exit "${MOCK_DOCKER_VOLUME_RM_EXIT:-0}"
+      ;;
+  esac
+fi
+
 exit 0
