@@ -121,7 +121,10 @@ Everything else, `dco` handles for you when run from a real terminal:
 - If the workspace has no GitHub remote, it offers to run
   `gh repo create --private --source=. --remote=origin --push` using
   whatever `gh` auth is already on your host (a separate credential from the
-  token below, so this doesn't widen the container's own access).
+  token below, so this doesn't widen the container's own access). If a repo
+  of that name already exists under your account (e.g. a naming collision
+  from a prior attempt), it offers to add that one as `origin` and push to
+  it instead of failing outright.
 - If `DCO_GITHUB_TOKEN` isn't set, it opens a pre-filled fine-grained token
   creation page (name, description, expiration, and exactly the
   Contents/Issues/Pull-requests-write permissions needed already filled in;
@@ -142,7 +145,16 @@ export DCO_GITHUB_HANDLE=yourhandle
 
 `dco` refuses to launch `--dsp` if the workspace isn't a git repo with a
 GitHub remote, if the resolved config's allowlist has no active entries
-(the firewall would be a no-op), or if `DCO_GITHUB_TOKEN` isn't set.
+(the firewall would be a no-op), or if `DCO_GITHUB_TOKEN` isn't set. None of
+this is transactional: a repo it creates, a token it saves, or a container
+it builds all stay in place even if a later step in the same launch fails,
+so retrying after a failure is normally cheap rather than something you
+need to clean up first. The one exception is a container that's already
+running for the exact same profile: `--dsp` warns and asks before
+proceeding, since two live autonomous sessions against the same repo can
+duplicate work on the same issue (not a data-loss risk: branches are
+independent and the guardrails above hold regardless, just wasted effort
+and faster GitHub API rate-limit usage).
 
 The shipped allowlist already covers Node, Python, Rust, Go, apt, and the
 common GitHub CDNs that trip up allowlist firewalls (raw file fetches,

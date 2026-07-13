@@ -124,6 +124,59 @@ setup_git_remote() {
   [ "$status" -eq 1 ]
 }
 
+# ── ensure_github_remote ──────────────────────────────────────────────────
+# Note: this function has no [[ -t 0 ]] tty gate itself (that lives at its
+# call site in main()), so it's directly testable with piped stdin.
+
+setup_git_repo_with_commit() {
+  local dir="$BATS_TEST_TMPDIR/repo-$RANDOM"
+  mkdir -p "$dir"
+  git -C "$dir" init -q
+  git -C "$dir" -c user.email=t@example.com -c user.name=t commit --allow-empty -q -m init
+  printf '%s' "$dir"
+}
+
+@test "ensure_github_remote creates a new repo when none exists, when confirmed" {
+  use_mocks
+  dir="$(setup_git_repo_with_commit)"
+  run ensure_github_remote "$dir" "test-repo" <<< "y"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"created and pushed: test-repo"* ]]
+  mock_called_with "gh repo create test-repo --private --source=$dir --remote=origin --push"
+}
+
+@test "ensure_github_remote declines without creating when not confirmed" {
+  use_mocks
+  dir="$(setup_git_repo_with_commit)"
+  run ensure_github_remote "$dir" "test-repo" <<< "n"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"needs a GitHub remote to work against"* ]]
+  ! mock_called_with "gh repo create"
+}
+
+@test "ensure_github_remote adds an existing repo as origin and pushes, when confirmed" {
+  use_mocks
+  dir="$(setup_git_repo_with_commit)"
+  bare="$BATS_TEST_TMPDIR/remote.git"
+  git init -q --bare "$bare"
+  MOCK_GH_REPO_VIEW_NAME_WITH_OWNER="someone/test-repo" MOCK_GH_REPO_VIEW_SSH_URL="$bare" \
+    run ensure_github_remote "$dir" "test-repo" <<< "y"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"added existing repo as origin and pushed: someone/test-repo"* ]]
+  [ "$(git -C "$dir" remote get-url origin)" = "$bare" ]
+  ! mock_called_with "gh repo create"
+}
+
+@test "ensure_github_remote dies with a clear message if pushing to an existing repo fails" {
+  use_mocks
+  dir="$(setup_git_repo_with_commit)"
+  MOCK_GH_REPO_VIEW_NAME_WITH_OWNER="someone/test-repo" \
+    MOCK_GH_REPO_VIEW_SSH_URL="$BATS_TEST_TMPDIR/does-not-exist.git" \
+    run ensure_github_remote "$dir" "test-repo" <<< "y"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"push to existing repo 'someone/test-repo' failed"* ]]
+}
+
 # ── substitute_github_handle ──────────────────────────────────────────────
 
 @test "substitute_github_handle replaces the placeholder when the var is set" {

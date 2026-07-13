@@ -89,6 +89,42 @@ github_owner_repo() {
   esac
 }
 
+# resolves a GitHub remote for --dsp interactively: if a repo of this name
+# already exists under the authenticated gh user, offers to add it as
+# origin and push to it; otherwise offers to create one fresh. A bare name
+# (no owner/) passed to `gh repo view` resolves against the authenticated
+# user's own account, so this only ever matches a repo you (or a prior dco
+# run) could plausibly have created here before, not some unrelated
+# same-named repo elsewhere — this is what makes retrying after a naming
+# collision (gh repo create failing with "already exists") resumable
+# instead of a dead end. Assumes the caller already confirmed stdin is a
+# tty and gh is installed; this function doesn't gate on either itself, so
+# it's callable directly (e.g. from tests) without a real tty.
+ensure_github_remote() {
+  local workspace="$1" repo_name="$2" existing name_with_owner ssh_url reply
+  existing="$(gh repo view "$repo_name" --json nameWithOwner,sshUrl --jq '[.nameWithOwner,.sshUrl] | @tsv' 2>/dev/null || true)"
+
+  if [[ -n "$existing" ]]; then
+    IFS=$'\t' read -r name_with_owner ssh_url <<< "$existing"
+    reply=""
+    read -r -p "dco: found an existing GitHub repo '$name_with_owner' — add it as origin and push? [y/N] " reply || true
+    [[ "$reply" =~ ^[Yy]$ ]] || die "--dsp needs a GitHub remote to work against; aborting."
+    git -C "$workspace" remote add origin "$ssh_url"
+    git -C "$workspace" push -u origin HEAD \
+      || die "push to existing repo '$name_with_owner' failed — it may have
+  history this checkout doesn't (e.g. from an earlier attempt). Check its
+  state on GitHub, then either pull/merge locally or delete it and retry."
+    info "added existing repo as origin and pushed: $name_with_owner"
+  else
+    reply=""
+    read -r -p "dco: create a private GitHub repo '$repo_name' and push? [gh repo create $repo_name --private --source=\"$workspace\" --remote=origin --push] [y/N] " reply || true
+    [[ "$reply" =~ ^[Yy]$ ]] || die "--dsp needs a GitHub remote to work against; aborting."
+    gh repo create "$repo_name" --private --source="$workspace" --remote=origin --push \
+      || die "gh repo create failed; create the GitHub repo yourself and retry."
+    info "created and pushed: $repo_name"
+  fi
+}
+
 # minimal encoding for the plain identifier strings we build ourselves
 # (token names/descriptions) — not a general-purpose URL encoder
 url_encode() { printf '%s' "${1// /+}"; }
@@ -374,23 +410,30 @@ info "using config: ${CONFIG#"$WORKSPACE/"}"
 
 # ── autonomous-mode guardrails ────────────────────────────────────────────────
 if $DSP; then
+  # devcontainer up tags each container with the exact config file it was
+  # started from, not just the workspace folder, so this only fires for a
+  # second launch of this *same* profile — a running default-profile
+  # container alongside a new autonomous one is unaffected. Not a data-loss
+  # risk either way (branches are independent, PR-only/no-force-push/no-
+  # self-merge hold regardless), but two live agents against the same repo
+  # can duplicate work on the same issue and burn through the shared GitHub
+  # API rate limit faster, so this asks rather than silently doubling up.
+  RUNNING_CONTAINER="$(docker ps -q --filter "label=devcontainer.local_folder=$WORKSPACE" --filter "label=devcontainer.config_file=$CONFIG" 2>/dev/null || true)"
+  if [[ -n "$RUNNING_CONTAINER" ]]; then
+    info "warning: a container is already running for this exact profile ($CONFIG)."
+    REPLY=""
+    read -r -p "dco: another autonomous session may already be active — continue anyway? [y/N] " REPLY || true
+    [[ "$REPLY" =~ ^[Yy]$ ]] || die "aborted: a container is already running for $CONFIG. Run 'dco --stop' first, or confirm to run alongside it."
+  fi
+
   [[ -d "$WORKSPACE/.git" ]] || die "--dsp needs $WORKSPACE to already be a git repo (run
   'git init' and make an initial commit first) — autonomous mode's whole
   workflow is git/GitHub-issue-driven."
 
   if ! git -C "$WORKSPACE" remote -v 2>/dev/null | grep -q 'github\.com'; then
     if [[ -t 0 ]] && command -v gh &>/dev/null; then
-      REPO_NAME="$(slugify "$(basename "$WORKSPACE")" 'a-zA-Z0-9._-')"
       info "no GitHub remote found for $WORKSPACE."
-      REPLY=""
-      read -r -p "dco: create a private GitHub repo '$REPO_NAME' and push? [gh repo create $REPO_NAME --private --source=\"$WORKSPACE\" --remote=origin --push] [y/N] " REPLY || true
-      if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-        gh repo create "$REPO_NAME" --private --source="$WORKSPACE" --remote=origin --push \
-          || die "gh repo create failed; create the GitHub repo yourself and retry."
-        info "created and pushed: $REPO_NAME"
-      else
-        die "--dsp needs a GitHub remote to work against; aborting."
-      fi
+      ensure_github_remote "$WORKSPACE" "$(slugify "$(basename "$WORKSPACE")" 'a-zA-Z0-9._-')"
     else
       die "--dsp refuses to launch: $WORKSPACE has no GitHub remote, and this is either
   non-interactive or 'gh' isn't installed on the host. Create the repo

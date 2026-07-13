@@ -171,6 +171,22 @@ setup() {
   [[ "$output" == *"no GitHub remote"* ]]
 }
 
+@test "--dsp warns and dies non-interactively when a container is already running for this profile" {
+  MOCK_DOCKER_CONTAINER_ID="abc123" run main "$WS" --dsp < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"already running"* ]]
+  [[ "$output" == *"aborted"* ]]
+}
+
+@test "--dsp proceeds past the running-container warning when confirmed" {
+  git -C "$WS" init -q
+  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
+  MOCK_DOCKER_CONTAINER_ID="abc123" DCO_GITHUB_TOKEN="fake-token" \
+    run main "$WS" --dsp <<< "y"
+  [ "$status" -eq 0 ]
+  mock_called_with "devcontainer up"
+}
+
 @test "--dsp defaults to the 'autonomous' sub-config when none is given" {
   git -C "$WS" init -q
   git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
