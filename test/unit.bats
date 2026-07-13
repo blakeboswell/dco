@@ -52,6 +52,28 @@ setup() {
   [ "$output" = "my-repo-name" ]
 }
 
+# ── strip_control_chars ────────────────────────────────────────────────────
+
+@test "strip_control_chars removes a leading ANSI cursor-move sequence" {
+  run strip_control_chars "$(printf '\x1b[Cghp_abc123')"
+  [ "$output" = "ghp_abc123" ]
+}
+
+@test "strip_control_chars removes a trailing ANSI cursor-move sequence" {
+  run strip_control_chars "$(printf 'ghp_abc123\x1b[D')"
+  [ "$output" = "ghp_abc123" ]
+}
+
+@test "strip_control_chars leaves a clean token untouched" {
+  run strip_control_chars "ghp_cleantoken123"
+  [ "$output" = "ghp_cleantoken123" ]
+}
+
+@test "strip_control_chars strips embedded control characters too" {
+  run strip_control_chars "$(printf 'ghp_a\tb\nc')"
+  [ "$output" = "ghp_abc" ]
+}
+
 # ── project_id ────────────────────────────────────────────────────────────
 
 @test "project_id is stable for the same workspace" {

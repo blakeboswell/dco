@@ -155,6 +155,22 @@ LABELS
 # (token names/descriptions) — not a general-purpose URL encoder
 url_encode() { printf '%s' "${1// /+}"; }
 
+# strips ANSI/CSI escape sequences and any other control characters from
+# pasted input before it's saved or used as an HTTP header value. A
+# terminal that emits a stray escape code mid-paste (e.g. a cursor-move
+# sequence from an arrow-key press) can otherwise corrupt a saved
+# DCO_GITHUB_TOKEN — `gh`/curl then fail every call with "invalid header
+# field value for Authorization", with no hint the token itself is the
+# problem. Note: an escape sequence's non-ESC bytes (e.g. the "[C" in the
+# cursor-forward code `ESC [ C`) are ordinary printable characters, so
+# stripping control characters alone leaves them behind; the CSI pattern
+# has to be matched and removed as a whole first.
+strip_control_chars() {
+  local s="$1"
+  s="$(printf '%s' "$s" | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g')"
+  printf '%s' "$s" | tr -d '[:cntrl:]'
+}
+
 # replaces every character of $1 outside the $2 character class with '-'.
 # Deliberately takes a plain string rather than piping a command's output
 # through `tr -c ... '-'`: tr -c also complements the trailing newline that
@@ -507,6 +523,7 @@ if $DSP; then
       DCO_GITHUB_TOKEN=""
       read -r -s -p "dco: paste the generated token here (input hidden): " DCO_GITHUB_TOKEN || true
       echo >&2
+      DCO_GITHUB_TOKEN="$(strip_control_chars "$DCO_GITHUB_TOKEN")"
       [[ -n "$DCO_GITHUB_TOKEN" ]] || die "no token entered; aborting."
       export DCO_GITHUB_TOKEN
 
@@ -515,6 +532,7 @@ if $DSP; then
         command -v gh &>/dev/null && SUGGESTED_HANDLE="$(gh api user --jq .login 2>/dev/null || true)"
         HANDLE_INPUT=""
         read -r -p "dco: your GitHub handle for @mentions${SUGGESTED_HANDLE:+ [$SUGGESTED_HANDLE]}: " HANDLE_INPUT || true
+        HANDLE_INPUT="$(strip_control_chars "$HANDLE_INPUT")"
         DCO_GITHUB_HANDLE="${HANDLE_INPUT:-$SUGGESTED_HANDLE}"
         [[ -n "$DCO_GITHUB_HANDLE" ]] && export DCO_GITHUB_HANDLE
       fi

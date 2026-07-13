@@ -138,7 +138,11 @@ Everything else, `dco` handles for you when run from a real terminal:
   you still pick the specific repo and click Generate, since a URL alone
   shouldn't be able to grant that), prompts you to paste the result back in,
   and asks for your GitHub handle (used for `@mentions`, defaulting to
-  whatever `gh` already knows about you).
+  whatever `gh` already knows about you). Both inputs are stripped of
+  control characters and ANSI escape sequences before being saved, since a
+  terminal that echoes a stray cursor-move code mid-paste can otherwise
+  corrupt the saved token into one that fails every API call with an
+  "invalid header field value" error, silently.
 - Both get saved to a gitignored `.env.local` next to the scaffolded
   profile (`chmod 600`), so this only happens once per project.
 - The `ready`/`in-progress`/`in-review`/`blocked` labels the operating
