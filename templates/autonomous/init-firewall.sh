@@ -55,9 +55,18 @@ ipset create allowed-domains hash:net
 
 # Fetch GitHub meta information and aggregate + add their IP ranges.
 # GitHub is always allowed once enforcement is active — git/gh need it
-# regardless of what's in the user's allowlist.
+# regardless of what's in the user's allowlist. Retried a few times before
+# giving up: this is core to the whole workflow (unlike an individual
+# allowlist domain below), so it stays fatal, but a transient network blip
+# shouldn't be treated the same as GitHub's API actually being unreachable.
 echo "Fetching GitHub IP ranges..."
-gh_ranges=$(curl -s https://api.github.com/meta)
+gh_ranges=""
+for attempt in 1 2 3; do
+    gh_ranges=$(curl -s https://api.github.com/meta)
+    [ -n "$gh_ranges" ] && break
+    echo "  attempt $attempt/3 failed, retrying..."
+    sleep 2
+done
 if [ -z "$gh_ranges" ]; then
     echo "ERROR: Failed to fetch GitHub IP ranges"
     exit 1
@@ -82,13 +91,23 @@ while read -r cidr; do
     ipset add allowed-domains "$cidr" -exist
 done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$' | aggregate -q)
 
-# Resolve and add domains from the allowlist
+# Resolve and add domains from the allowlist. Retried a few times, then
+# skipped (not fatal) if it still won't resolve: a single flaky domain
+# (transient DNS blip, or a non-critical one like a telemetry endpoint)
+# shouldn't take down the whole container — it just stays unreachable,
+# which is fail-safe (still default-deny) rather than fail-open.
 for domain in "${ALLOWED_DOMAINS[@]}"; do
     echo "Resolving $domain..."
-    ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
+    ips=""
+    for attempt in 1 2 3; do
+        ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
+        [ -n "$ips" ] && break
+        echo "  attempt $attempt/3 failed, retrying..."
+        sleep 2
+    done
     if [ -z "$ips" ]; then
-        echo "ERROR: Failed to resolve $domain"
-        exit 1
+        echo "WARNING: failed to resolve $domain after 3 attempts — skipping it (it will be unreachable, not the whole firewall)"
+        continue
     fi
 
     while read -r ip; do

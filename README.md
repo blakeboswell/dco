@@ -105,7 +105,11 @@ Running with zero prompts only makes sense alongside a few other things:
 
 1. **A real firewall.** Autonomous mode flips network posture from this
    tool's normal open-by-default to enforced default-deny, using a populated
-   allowlist instead of the empty one the default profile ships with.
+   allowlist instead of the empty one the default profile ships with. Each
+   allowlist domain is resolved (and GitHub's IP ranges fetched) with a
+   short retry on failure; a domain that still won't resolve is skipped
+   with a warning rather than aborting the whole container, so one flaky
+   DNS lookup doesn't take down the entire launch.
 2. **A scoped credential.** A fine-grained GitHub token limited to the
    target repo, not your full personal access.
 3. **A PR-only workflow.** Claude opens PRs against issues; a human always
