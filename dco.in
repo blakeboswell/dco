@@ -585,8 +585,18 @@ GIT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
 SHELL_CMD="bash"
 CLAUDE_CMD="claude"
 if $DSP; then
-  CLAUDE_CMD="claude --dangerously-skip-permissions"
-  info "autonomous mode: firewall enforcing, GH_TOKEN set, PR-only workflow, guardrail hook active — launching with --dangerously-skip-permissions"
+  # a bare `claude --dangerously-skip-permissions` just opens an interactive
+  # REPL and waits — Claude Code doesn't act on CLAUDE.md on its own without
+  # a first turn, so with nobody there to type one, it would just sit idle
+  # forever. Passing a prompt as a positional argument sends it as that
+  # first turn while staying interactive afterward (unlike -p/--print,
+  # which runs one-shot and exits) — this only fires on a genuinely fresh
+  # `tmux new-session`, since `-A` ignores the trailing command entirely
+  # when attaching to a session that already exists, so reattaching to a
+  # running agent never re-injects it mid-conversation.
+  BOOTSTRAP_PROMPT="Follow your CLAUDE.md operating instructions: check for an existing recurring schedule, set one up if none exists, then start the loop-priority checklist."
+  CLAUDE_CMD="claude --dangerously-skip-permissions $(printf '%q' "$BOOTSTRAP_PROMPT")"
+  info "autonomous mode: firewall enforcing, GH_TOKEN set, PR-only workflow, guardrail hook active — launching with --dangerously-skip-permissions and an initial bootstrap prompt"
 fi
 
 if $LAUNCH_CLAUDE; then

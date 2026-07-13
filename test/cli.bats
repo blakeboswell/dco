@@ -263,3 +263,25 @@ setup() {
   mock_called_with "git config --global user.name Test User"
   mock_called_with "git config --global user.email test@example.com"
 }
+
+# ── bootstrap prompt ───────────────────────────────────────────────────────
+
+@test "--dsp launches claude with a bootstrap prompt, as one argument" {
+  git -C "$WS" init -q
+  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
+  mkdir -p "$WS/.devcontainer/autonomous"
+  echo "example.com" > "$WS/.devcontainer/autonomous/allowlist.txt"
+  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
+  DCO_GITHUB_TOKEN="fake-token" run main "$WS" --dsp < /dev/null
+  [ "$status" -eq 0 ]
+  # the whole prompt must survive as a single argument through the
+  # composed tmux/bash -lc command line, not get word-split
+  mock_called_with "claude --dangerously-skip-permissions Follow\\ your\\ CLAUDE.md\\ operating\\ instructions:"
+}
+
+@test "plain --claude (no --dsp) launches claude with no bootstrap prompt" {
+  run main "$WS" --claude
+  [ "$status" -eq 0 ]
+  mock_called_with "tmux new-session -A -s claude claude"
+  ! mock_called_with "CLAUDE.md operating instructions"
+}

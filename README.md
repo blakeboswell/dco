@@ -102,16 +102,21 @@ you questions. Think of it as directing a team of junior engineers rather
 than pairing on every line.
 
 `--dsp` starts exactly one session in a persistent tmux session; it doesn't
-make anything poll GitHub on a schedule by itself. `CLAUDE.md`'s operating
-instructions tell that first session to check whether a recurring schedule
-already exists for the project and, if not, set one up itself (using its
-own scheduling tooling) before doing anything else, so the issue queue
+make anything poll GitHub on a schedule by itself, and a bare
+`claude --dangerously-skip-permissions` just opens an interactive session
+and waits, since Claude Code doesn't act on `CLAUDE.md` without a first
+turn. So `--dsp` sends one itself, as the session's first message,
+directing it to `CLAUDE.md`: check whether a recurring schedule already
+exists for the project and, if not, set one up itself (using its own
+scheduling tooling) before doing anything else, so the issue queue
 actually gets checked over time rather than only whenever a human happens
-to reopen the session. `dco` deliberately doesn't implement its own
-scheduling mechanism for this: Claude Code's own scheduling primitives
-already handle session resumption and auth properly, and reimplementing
-that as a host-side cron job inside `dco` would just be a less robust
-version of the same thing.
+to reopen the session. This only fires on a genuinely fresh session:
+reattaching to one that's already running (`dco --dsp` again, or
+`dco --sub-config autonomous`) never re-sends it mid-conversation. `dco`
+deliberately doesn't implement the *recurring* half of this itself:
+Claude Code's own scheduling primitives already handle session resumption
+and auth properly, and reimplementing that as a host-side cron job inside
+`dco` would just be a less robust version of the same thing.
 
 Running with zero prompts only makes sense alongside a few other things:
 
