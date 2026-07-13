@@ -65,8 +65,17 @@ Confirm there's no remote yet: `git remote -v` should print nothing.
 ## 3. Autonomous mode setup (`--dsp`)
 
 ```sh
-dco . autonomous --dsp
+dco --dsp
 ```
+
+`--dsp` defaults `--sub-config` to `autonomous` when you don't pass one
+explicitly, so this scaffolds and uses `./.devcontainer/autonomous/`, a
+second, locked-down devcontainer profile alongside whatever's already at
+`./.devcontainer/` from step 1 (they're independent: `autonomous` gets its
+own volumes, its own `.env.local`, its own allowlist). See the README's
+Usage section for the general `--sub-config` explanation, including how to
+point `--dsp` at a different, custom-scoped profile with
+`dco --dsp --sub-config <name>`.
 
 Walk through each prompt as it appears:
 
@@ -137,7 +146,7 @@ permission prompts).
 Detach (`Ctrl-b` then `d`), then get a plain shell in the same container:
 
 ```sh
-dco . autonomous
+dco --sub-config autonomous
 ```
 
 From inside:

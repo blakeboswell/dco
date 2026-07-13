@@ -175,6 +175,16 @@ setup_git_remote() {
   [[ "$output" == *"template dir not found"* ]]
 }
 
+@test "scaffold_devcontainer does not touch an existing named sub-config directory" {
+  dest="$BATS_TEST_TMPDIR/.devcontainer"
+  mkdir -p "$dest/autonomous"
+  echo "hand-customized" > "$dest/autonomous/CLAUDE.md"
+  scaffold_devcontainer "$dest"
+  [ -f "$dest/devcontainer.json" ]
+  run cat "$dest/autonomous/CLAUDE.md"
+  [ "$output" = "hand-customized" ]
+}
+
 @test "scaffold_named_subconfig scaffolds a shipped profile" {
   dest="$BATS_TEST_TMPDIR/.devcontainer/autonomous"
   run scaffold_named_subconfig "autonomous" "$dest"

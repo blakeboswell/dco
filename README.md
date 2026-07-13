@@ -27,19 +27,33 @@ To uninstall, clone the repo and run `make uninstall` (with the same
 ## Usage
 
 ```
-dco [path] [sub-config] [flags]
+dco [path] [flags]
 ```
+
+`path` is the project directory (default: current directory).
 
 | Flag | Effect |
 |---|---|
 | `-c`, `--claude` | Launch Claude Code in a persistent tmux session (see below) |
 | `-r`, `--rebuild` | Force rebuild (removes existing container first) |
 | `-s`, `--stop` | Stop and remove the project's container |
-| `--purge` | Like `--stop`, but also deletes its volumes (bash history, Claude's memory) — irreversible, always confirms first |
+| `--purge` | Like `--stop`, but also deletes its volumes (bash history, Claude's memory). Irreversible, always confirms first |
 | `-g`, `--regen` | Refresh a project's `.devcontainer/` from the latest templates |
-| `--dsp` | Launch Claude with `--dangerously-skip-permissions` (implies `--claude`, see below) |
+| `--dsp` | Launch Claude with `--dangerously-skip-permissions` (implies `--claude`; defaults `--sub-config` to `autonomous`, see below) |
+| `--sub-config <name>` | Use `.devcontainer/<name>/devcontainer.json` instead of the default profile |
 | `-l`, `--list` | List all running devcontainers |
 | `-h`, `--help` | Show help |
+
+`--sub-config <name>` is *not* a separate directory to create alongside your
+project: it names an alternate devcontainer config at
+`<path>/.devcontainer/<name>/devcontainer.json`, for projects that need more
+than one profile (e.g. a default one plus a locked-down `autonomous` one).
+If that sub-config doesn't exist yet, `dco` scaffolds it from a shipped
+template of the same name (currently just `autonomous`). `--dsp` defaults
+`--sub-config` to `autonomous` when you don't pass one explicitly, since
+that's the profile with a populated allowlist and the guardrail hook, both
+of which `--dsp` requires; pass `--sub-config` yourself to run a different,
+custom-scoped autonomous profile instead.
 
 ## Detaching and reattaching to Claude
 
@@ -75,7 +89,7 @@ hand-edited, refresh it with `dco --regen [path]` and then `dco --rebuild`.
 
 ## Autonomous mode (`--dsp`)
 
-`dco . autonomous --dsp` runs Claude unattended: no tool-use prompts at all,
+`dco --dsp` runs Claude unattended: no tool-use prompts at all,
 with this repo's GitHub Issues and PRs as its task queue and its way to ask
 you questions. Think of it as directing a team of junior engineers rather
 than pairing on every line.
@@ -100,7 +114,7 @@ Setup:
    force-push. This is the real, server-side backstop; the guardrail hook
    above is a local layer underneath it, not a replacement for it. This one
    step isn't automatable and has to happen on GitHub itself.
-2. `dco . autonomous --dsp`.
+2. `dco --dsp`.
 
 Everything else, `dco` handles for you when run from a real terminal:
 

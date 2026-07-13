@@ -106,28 +106,43 @@ setup() {
   [[ "$output" == *"existing"* ]]
 }
 
-@test "scaffolds the shipped 'autonomous' sub-config on first use" {
-  run main "$WS" autonomous
+@test "scaffolds the shipped 'autonomous' sub-config on first use via --sub-config" {
+  run main "$WS" --sub-config autonomous
   [ "$status" -eq 0 ]
   [ -f "$WS/.devcontainer/autonomous/devcontainer.json" ]
 }
 
-@test "dies with the list of shipped profiles for an unknown sub-config name" {
-  run main "$WS" not-a-real-profile
+@test "dies with the list of shipped profiles for an unknown --sub-config name" {
+  run main "$WS" --sub-config not-a-real-profile
   [ "$status" -eq 1 ]
   [[ "$output" == *"no shipped profile named 'not-a-real-profile'"* ]]
   [[ "$output" == *"autonomous"* ]]
 }
 
-@test "lists multiple named sub-configs and exits 1 when none is specified" {
-  mkdir -p "$WS/.devcontainer/staging" "$WS/.devcontainer/prod"
-  echo '{}' > "$WS/.devcontainer/staging/devcontainer.json"
-  echo '{}' > "$WS/.devcontainer/prod/devcontainer.json"
-  run main "$WS"
+@test "--sub-config dies if given with no value" {
+  run main "$WS" --sub-config
   [ "$status" -eq 1 ]
-  [[ "$output" == *"multiple configs found"* ]]
-  [[ "$output" == *"staging"* ]]
-  [[ "$output" == *"prod"* ]]
+  [[ "$output" == *"--sub-config needs a value"* ]]
+}
+
+@test "dies with a migration hint on a stray second positional argument" {
+  run main "$WS" autonomous
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"too many arguments"* ]]
+  [[ "$output" == *"--sub-config"* ]]
+}
+
+@test "surfaces an existing named sub-config, then still scaffolds the default when none was requested" {
+  mkdir -p "$WS/.devcontainer/autonomous"
+  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
+  run main "$WS"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"also has sub-config(s) here: autonomous"* ]]
+  [ -f "$WS/.devcontainer/devcontainer.json" ]
+  # the pre-existing sub-config must be untouched, not overwritten by the
+  # default-profile scaffold (scaffold_devcontainer skips subdirectories)
+  run cat "$WS/.devcontainer/autonomous/devcontainer.json"
+  [ "$output" = "{}" ]
 }
 
 # ── regen mode ────────────────────────────────────────────────────────────
@@ -156,9 +171,36 @@ setup() {
   [[ "$output" == *"no GitHub remote"* ]]
 }
 
+@test "--dsp defaults to the 'autonomous' sub-config when none is given" {
+  git -C "$WS" init -q
+  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
+  DCO_GITHUB_TOKEN="fake-token" run main "$WS" --dsp < /dev/null
+  [ "$status" -eq 0 ]
+  [ -f "$WS/.devcontainer/autonomous/devcontainer.json" ]
+  # never touches/creates a top-level default profile
+  [ ! -f "$WS/.devcontainer/devcontainer.json" ]
+}
+
+@test "--sub-config overrides --dsp's autonomous default" {
+  git -C "$WS" init -q
+  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
+  mkdir -p "$WS/.devcontainer/custom"
+  echo "example.com" > "$WS/.devcontainer/custom/allowlist.txt"
+  echo '{}' > "$WS/.devcontainer/custom/devcontainer.json"
+  DCO_GITHUB_TOKEN="fake-token" run main "$WS" --dsp --sub-config custom < /dev/null
+  [ "$status" -eq 0 ]
+  mock_called_with "devcontainer up"
+  [ ! -d "$WS/.devcontainer/autonomous" ]
+}
+
 @test "--dsp dies when the resolved allowlist has no active entries" {
   git -C "$WS" init -q
   git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
+  # pre-create the autonomous profile with an emptied allowlist, simulating
+  # someone having stripped it down (the shipped one ships pre-populated)
+  mkdir -p "$WS/.devcontainer/autonomous"
+  : > "$WS/.devcontainer/autonomous/allowlist.txt"
+  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
   run main "$WS" --dsp < /dev/null
   [ "$status" -eq 1 ]
   [[ "$output" == *"no active entries"* ]]
@@ -167,9 +209,9 @@ setup() {
 @test "--dsp dies non-interactively when DCO_GITHUB_TOKEN is unset, even with a good allowlist" {
   git -C "$WS" init -q
   git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
-  mkdir -p "$WS/.devcontainer"
-  echo "example.com" > "$WS/.devcontainer/allowlist.txt"
-  echo '{}' > "$WS/.devcontainer/devcontainer.json"
+  mkdir -p "$WS/.devcontainer/autonomous"
+  echo "example.com" > "$WS/.devcontainer/autonomous/allowlist.txt"
+  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
   unset DCO_GITHUB_TOKEN
   run main "$WS" --dsp < /dev/null
   [ "$status" -eq 1 ]
@@ -179,9 +221,9 @@ setup() {
 @test "--dsp proceeds once git remote, allowlist, and token are all satisfied" {
   git -C "$WS" init -q
   git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
-  mkdir -p "$WS/.devcontainer"
-  echo "example.com" > "$WS/.devcontainer/allowlist.txt"
-  echo '{}' > "$WS/.devcontainer/devcontainer.json"
+  mkdir -p "$WS/.devcontainer/autonomous"
+  echo "example.com" > "$WS/.devcontainer/autonomous/allowlist.txt"
+  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
   DCO_GITHUB_TOKEN="fake-token" run main "$WS" --dsp < /dev/null
   [ "$status" -eq 0 ]
   mock_called_with "devcontainer up"

@@ -3,17 +3,18 @@
 # Usage:
 #   dco                              # shell in /workspace in CWD's container
 #   dco /path/to/project             # shell in /workspace in specific project
-#   dco . gpu-trading                # named sub-config in CWD
-#   dco /path/to/project name        # named sub-config in project
+#   dco --sub-config gpu-trading     # named sub-config in CWD
+#   dco /path/to/project --sub-config name  # named sub-config in project
 #   dco --claude                     # open CWD's container, attach/create tmux 'claude' session
 #   dco /path/to/project --claude    # same, in a specific project
 #                                    # (detach with Ctrl-b d; rerun --claude to reattach)
 #   dco --rebuild                    # force rebuild before attaching
 #   dco --stop [path]                # stop/remove a project's container
-#   dco --purge [path] [sub-config]  # stop + also delete its volumes (bash history, Claude memory)
+#   dco --purge [path]               # stop + also delete its volumes (bash history, Claude memory)
 #   dco --list                       # list running devcontainers
 #   dco --regen [path]               # refresh .devcontainer/ from latest templates
-#   dco . autonomous --dsp           # unattended Claude, GitHub-issue-driven (see README)
+#   dco --dsp                        # unattended Claude, GitHub-issue-driven (see README)
+#                                    # (defaults --sub-config to the shipped 'autonomous' profile)
 
 set -euo pipefail
 
@@ -24,15 +25,24 @@ die()  { echo "dco: error: $*" >&2; exit 1; }
 info() { echo "dco: $*" >&2; }
 
 # copies the latest templates/+config/ into <dest>, overwriting any
-# top-level files but leaving named sub-configs (<dest>/<name>/) alone
+# top-level files but leaving named sub-configs (<dest>/<name>/) alone.
+# Every directory directly under templates/ (e.g. templates/autonomous/) is
+# a named sub-config's own template, scaffolded separately by
+# scaffold_named_subconfig — copy only top-level files here, or `cp -r
+# templates/.` would recurse into an existing <dest>/autonomous/ and
+# silently clobber a hand-customized CLAUDE.md/allowlist.txt/etc with the
+# stock shipped versions.
 scaffold_devcontainer() {
-  local dest="$1"
+  local dest="$1" entry
   [[ -d "$SHAREDIR/templates" ]] || \
     die "template dir not found: $SHAREDIR/templates — run 'make install', don't execute dco.in directly"
   [[ -f "$SHAREDIR/config/allowlist.txt" ]] || \
     die "config not found: $SHAREDIR/config/allowlist.txt — run 'make install', don't execute dco.in directly"
   mkdir -p "$dest"
-  cp -r "$SHAREDIR/templates/." "$dest/"
+  for entry in "$SHAREDIR"/templates/*; do
+    [[ -d "$entry" ]] && continue
+    cp "$entry" "$dest/"
+  done
   cp "$SHAREDIR/config/allowlist.txt" "$dest/allowlist.txt"
   chmod +x "$dest/init-firewall.sh"
 }
@@ -128,11 +138,10 @@ usage() {
 dco — Dev Container Open
 
 Usage:
-  dco [path] [sub-config] [flags]
+  dco [path] [flags]
 
 Arguments:
   path          Project directory (default: current directory)
-  sub-config    Named config under .devcontainer/<name>/devcontainer.json
 
 Flags:
   -c, --claude    Launch Claude Code in a persistent tmux session ('claude')
@@ -141,7 +150,12 @@ Flags:
       --purge     Like --stop, but also delete its volumes (bash history,
                   Claude's memory) — irreversible, always confirms first
   -g, --regen     Refresh a project's .devcontainer/ from the latest templates
-      --dsp       Launch Claude with --dangerously-skip-permissions (implies --claude)
+      --dsp       Launch Claude with --dangerously-skip-permissions (implies
+                  --claude; defaults --sub-config to 'autonomous')
+      --sub-config <name>
+                  Use .devcontainer/<name>/devcontainer.json instead of the
+                  default profile, scaffolding it from a shipped template
+                  (currently just 'autonomous') if it doesn't exist yet
   -l, --list      List all running devcontainers
   -h, --help      Show this help
 
@@ -160,13 +174,14 @@ either is missing; see the README's Autonomous mode section for details.
 Examples:
   dco                              # shell in CWD's container
   dco ~/projects/trading           # shell in specific project
-  dco . gpu-trading                # named sub-config in CWD
+  dco --sub-config gpu-trading     # named sub-config in CWD
   dco --claude                     # attach/create tmux session running Claude
   dco --rebuild --claude           # rebuild then launch Claude
   dco --stop ~/projects/trading    # remove that project's container
   dco --purge ~/projects/trading   # also delete its volumes (irreversible)
   dco --regen ~/projects/trading   # refresh that project's .devcontainer/ from templates
-  dco . autonomous --dsp           # unattended Claude, GitHub-issue-driven
+  dco --dsp                        # unattended Claude, GitHub-issue-driven (--sub-config autonomous)
+  dco --sub-config autonomous      # plain shell in the autonomous profile, no --dsp
   dco --list                       # show all running devcontainers
 
 Shell function (add to .zshrc):
@@ -191,9 +206,10 @@ PURGE=false
 REGEN=false
 DSP=false
 LIST=false
+SUB_CONFIG=""
 POSITIONAL=()
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --claude|-c)  LAUNCH_CLAUDE=true ;;
     --rebuild|-r) REBUILD=true ;;
     --stop|-s)    STOP=true ;;
@@ -201,9 +217,15 @@ for arg in "$@"; do
     --regen|-g)   REGEN=true ;;
     --dsp)        DSP=true; LAUNCH_CLAUDE=true ;;
     --list|-l)    LIST=true ;;
+    --sub-config)
+      [[ $# -ge 2 ]] || die "--sub-config needs a value, e.g. --sub-config autonomous"
+      SUB_CONFIG="$2"
+      shift
+      ;;
     --help|-h)    usage ;;
-    *) POSITIONAL+=("$arg") ;;
+    *) POSITIONAL+=("$1") ;;
   esac
+  shift
 done
 
 # ── list mode ─────────────────────────────────────────────────────────────────
@@ -214,11 +236,23 @@ if $LIST; then
   exit 0
 fi
 
+[[ ${#POSITIONAL[@]} -le 1 ]] || \
+  die "too many arguments: ${POSITIONAL[*]:1} — sub-configs are now selected with
+  --sub-config <name>, not a second positional argument."
+
 WORKSPACE="${POSITIONAL[0]:-$(pwd)}"
-SUB_CONFIG="${POSITIONAL[1]:-}"
 WORKSPACE="$(realpath "$WORKSPACE")"
 
 [[ -d "$WORKSPACE" ]] || die "not a directory: $WORKSPACE"
+
+# --dsp defaults to the shipped 'autonomous' sub-config unless a different
+# one was explicitly requested with --sub-config: that's the profile with a
+# populated allowlist and the guardrail hook, which --dsp requires (see the
+# allowlist check below) — the default profile is open-by-design and can't
+# satisfy it.
+if $DSP && [[ -z "$SUB_CONFIG" ]]; then
+  SUB_CONFIG="autonomous"
+fi
 
 DCO_PROJECT_ID="$(project_id "$WORKSPACE" "$SUB_CONFIG")"
 export DCO_PROJECT_ID
@@ -316,25 +350,23 @@ elif [[ -f "$WORKSPACE/.devcontainer.json" ]]; then
 elif [[ -f "$WORKSPACE/.devcontainer/devcontainer.json" ]]; then
   CONFIG="$WORKSPACE/.devcontainer/devcontainer.json"
 else
-  # list available configs if multiple exist
-  CONFIGS=("$WORKSPACE"/.devcontainer/*/devcontainer.json)
-  if [[ ${#CONFIGS[@]} -eq 1 && -f "${CONFIGS[0]}" ]]; then
-    CONFIG="${CONFIGS[0]}"
-  elif [[ ${#CONFIGS[@]} -gt 1 ]]; then
-    echo "dco: multiple configs found — pick one:" >&2
-    for c in "${CONFIGS[@]}"; do
-      name="$(basename "$(dirname "$c")")"
-      echo "  dco $(basename "$WORKSPACE") $name" >&2
-    done
-    exit 1
-  else
-    info "no devcontainer.json found — creating default .devcontainer in $WORKSPACE"
-    DEST="$WORKSPACE/.devcontainer"
-    scaffold_devcontainer "$DEST"
-
-    CONFIG="$DEST/devcontainer.json"
-    info "created $CONFIG (Claude Code Sandbox)"
+  # no default profile yet and no --sub-config given: fall through to
+  # scaffolding the default. If other named sub-configs already exist
+  # (e.g. 'autonomous'), surface them first — plain `dco` always means
+  # "the default profile," but a project that's only ever run --dsp on
+  # this workspace shouldn't leave that fact invisible.
+  OTHER_SUBCONFIGS=("$WORKSPACE"/.devcontainer/*/devcontainer.json)
+  if [[ -f "${OTHER_SUBCONFIGS[0]:-}" ]]; then
+    NAMES=()
+    for c in "${OTHER_SUBCONFIGS[@]}"; do NAMES+=("$(basename "$(dirname "$c")")"); done
+    info "this project also has sub-config(s) here: ${NAMES[*]} (use --sub-config <name> to use one instead)"
   fi
+  info "no devcontainer.json found — creating default .devcontainer in $WORKSPACE"
+  DEST="$WORKSPACE/.devcontainer"
+  scaffold_devcontainer "$DEST"
+
+  CONFIG="$DEST/devcontainer.json"
+  info "created $CONFIG (Claude Code Sandbox)"
 fi
 
 [[ -f "$CONFIG" ]] || die "config not found: $CONFIG"
