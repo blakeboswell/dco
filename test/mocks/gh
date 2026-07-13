@@ -19,5 +19,8 @@ case "$1 $2" in
     [[ -n "${MOCK_GH_HANDLE:-}" ]] && printf '%s\n' "${MOCK_GH_HANDLE}"
     exit "${MOCK_GH_API_EXIT:-0}"
     ;;
+  "label create")
+    exit "${MOCK_GH_LABEL_CREATE_EXIT:-0}"
+    ;;
 esac
 exit 0

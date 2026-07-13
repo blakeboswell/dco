@@ -243,6 +243,10 @@ setup() {
   DCO_GITHUB_TOKEN="fake-token" run main "$WS" --dsp < /dev/null
   [ "$status" -eq 0 ]
   mock_called_with "devcontainer up"
+  # the label taxonomy CLAUDE.md depends on gets bootstrapped every launch,
+  # not just when the remote was freshly created
+  mock_called_with "gh label create ready --repo blakeboswell/dco"
+  mock_called_with "gh label create blocked --repo blakeboswell/dco"
 }
 
 # ── git identity sync ─────────────────────────────────────────────────────

@@ -125,6 +125,32 @@ ensure_github_remote() {
   fi
 }
 
+# creates (or updates, via --force) the four labels templates/autonomous/CLAUDE.md's
+# operating instructions depend on, so a fresh repo works with autonomous
+# mode out of the box instead of silently never picking up any issue
+# because 'ready' doesn't exist yet. Idempotent and safe to call on every
+# --dsp launch, not just when the repo was just created. Best-effort: a
+# failure here (e.g. a transient API hiccup) is worth surfacing but
+# shouldn't block the whole launch the way the allowlist/token guardrails
+# do, so this warns rather than dies.
+ensure_labels() {
+  local owner_repo="$1" name color description failed=false
+  [[ -n "$owner_repo" ]] || return 0
+  while IFS='|' read -r name color description; do
+    gh label create "$name" --repo "$owner_repo" --color "$color" --description "$description" --force >/dev/null 2>&1 \
+      || failed=true
+  done <<'LABELS'
+ready|0e8a16|Vetted by a human as available for the autonomous agent to pick up
+in-progress|fbca04|The autonomous agent is actively working this
+in-review|0052cc|A PR is open for this issue, awaiting human review
+blocked|d93f0b|The agent has a specific question blocking progress — see the linked comment
+LABELS
+  if $failed; then
+    info "warning: failed to create/update one or more of the ready/in-progress/in-review/blocked labels on $owner_repo — autonomous mode depends on 'ready' existing and being applied to issues you want it to pick up"
+  fi
+  return 0
+}
+
 # minimal encoding for the plain identifier strings we build ourselves
 # (token names/descriptions) — not a general-purpose URL encoder
 url_encode() { printf '%s' "${1// /+}"; }
@@ -440,6 +466,12 @@ if $DSP; then
   yourself (gh repo create --source=. --remote=origin --push) and retry."
     fi
   fi
+
+  # every launch, not just when the remote was just created: covers a
+  # remote that was already there before dco was ever involved (e.g. added
+  # by hand), which would otherwise never get the labels CLAUDE.md's
+  # operating instructions depend on
+  command -v gh &>/dev/null && ensure_labels "$(github_owner_repo "$WORKSPACE" || true)"
 
   ALLOWLIST_FILE="$(dirname "$CONFIG")/allowlist.txt"
   ALLOWLIST_COUNT=0

@@ -134,6 +134,11 @@ Everything else, `dco` handles for you when run from a real terminal:
   whatever `gh` already knows about you).
 - Both get saved to a gitignored `.env.local` next to the scaffolded
   profile (`chmod 600`), so this only happens once per project.
+- The `ready`/`in-progress`/`in-review`/`blocked` labels the operating
+  instructions' task queue depends on get created (or updated, if already
+  present) on the repo, every launch. Only issues labeled `ready` are ever
+  picked up: filing an issue doesn't queue it up on its own, you also need
+  to apply that label yourself once it's vetted.
 
 None of this happens non-interactively: without a terminal to prompt in,
 `dco` still just fails fast with instructions, the same as before. You can

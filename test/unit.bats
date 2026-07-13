@@ -177,6 +177,31 @@ setup_git_repo_with_commit() {
   [[ "$output" == *"push to existing repo 'someone/test-repo' failed"* ]]
 }
 
+# ── ensure_labels ──────────────────────────────────────────────────────────
+
+@test "ensure_labels creates all four labels the CLAUDE.md taxonomy depends on" {
+  use_mocks
+  ensure_labels "someone/test-repo"
+  mock_called_with "gh label create ready --repo someone/test-repo"
+  mock_called_with "gh label create in-progress --repo someone/test-repo"
+  mock_called_with "gh label create in-review --repo someone/test-repo"
+  mock_called_with "gh label create blocked --repo someone/test-repo"
+  mock_called_with "--force"
+}
+
+@test "ensure_labels is a no-op given an empty owner/repo" {
+  use_mocks
+  ensure_labels ""
+  [ ! -s "$MOCK_LOG" ]
+}
+
+@test "ensure_labels warns but does not die if label creation fails" {
+  use_mocks
+  MOCK_GH_LABEL_CREATE_EXIT=1 run ensure_labels "someone/test-repo"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: failed to create/update"* ]]
+}
+
 # ── substitute_github_handle ──────────────────────────────────────────────
 
 @test "substitute_github_handle replaces the placeholder when the var is set" {
