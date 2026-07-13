@@ -192,6 +192,15 @@ Claude can't edit the allowlist itself (the mount is read-only), so a new
 domain always goes through you: it'll ask via a `blocked` issue, and once
 you've added and committed the domain, it reloads the firewall itself.
 
+`init-firewall.sh` itself works differently: it's baked into the image at
+build time by the shared `Dockerfile` every profile uses (deliberately not
+bind-mounted: a container user with write access to it, combined with the
+passwordless sudo above, would be a straightforward privilege escalation).
+That means there's only ever one copy, `.devcontainer/init-firewall.sh` at
+the top level, regardless of sub-config; `dco --regen [path]` refreshes it
+for every profile, autonomous included, even though `--regen` otherwise
+only touches the top-level `.devcontainer/`.
+
 ## Git identity
 
 Every launch, `dco` reads `git config --global user.name` / `user.email` from

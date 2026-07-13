@@ -290,7 +290,19 @@ setup_git_repo_with_commit() {
   run scaffold_named_subconfig "autonomous" "$dest"
   [ "$status" -eq 0 ]
   [ -f "$dest/devcontainer.json" ]
-  [ -x "$dest/init-firewall.sh" ]
+  [ -f "$dest/allowlist.txt" ]
+  [ -f "$dest/settings.json" ]
+}
+
+@test "scaffold_named_subconfig does not ship a per-profile init-firewall.sh" {
+  # the autonomous profile's devcontainer.json shares the top-level
+  # Dockerfile (dockerfile: ../Dockerfile), so devcontainer CLI's build
+  # context resolves to the top-level .devcontainer/, not
+  # .devcontainer/autonomous/ -- a scaffolded copy here would look
+  # editable/profile-specific but silently never be read at build time
+  dest="$BATS_TEST_TMPDIR/.devcontainer/autonomous"
+  scaffold_named_subconfig "autonomous" "$dest"
+  [ ! -f "$dest/init-firewall.sh" ]
 }
 
 @test "scaffold_named_subconfig returns 1 for an unknown profile, without dying" {

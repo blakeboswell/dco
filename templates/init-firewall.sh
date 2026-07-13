@@ -1,7 +1,14 @@
 #!/bin/bash
-# NOTE: templates/autonomous/init-firewall.sh is a byte-identical copy of
-# this file (Docker COPY can't follow a symlink outside its build context).
-# If you edit this file, apply the same edit there.
+# This is the only copy: templates/autonomous/devcontainer.json points its
+# "dockerfile" at ../Dockerfile (this same shared Dockerfile), and
+# `devcontainer` CLI resolves the build context to wherever that dockerfile
+# path actually lands — the top-level .devcontainer/, not
+# .devcontainer/autonomous/. So the Dockerfile's `COPY init-firewall.sh` is
+# always this file, for every profile. Don't add a per-profile copy under
+# templates/<name>/: it would look editable/profile-specific but silently
+# never be read. `dco --regen` (which only refreshes the top-level
+# .devcontainer/) is therefore sufficient to update this for every profile,
+# autonomous included — no per-sub-config regen needed for this file.
 set -euo pipefail
 IFS=$'\n\t'
 

@@ -14,7 +14,6 @@ load test_helper
   [ -x "$prefix/bin/dco" ]
   [ -f "$prefix/share/dco/templates/devcontainer.json" ]
   [ -x "$prefix/share/dco/templates/init-firewall.sh" ]
-  [ -x "$prefix/share/dco/templates/autonomous/init-firewall.sh" ]
   [ -f "$prefix/share/dco/config/allowlist.txt" ]
 
   # the @SHAREDIR@ placeholder must be substituted, not left literal

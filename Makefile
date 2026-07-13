@@ -22,7 +22,6 @@ install:
 	chmod +x "$(BINDIR)/dco"
 	cp -r templates/. "$(SHAREDIR)/templates/"
 	chmod +x "$(SHAREDIR)/templates/init-firewall.sh"
-	chmod +x "$(SHAREDIR)/templates/autonomous/init-firewall.sh"
 	cp config/allowlist.txt "$(SHAREDIR)/config/"
 	@echo "installed $(BINDIR)/dco (SHAREDIR=$(SHAREDIR))"
 
@@ -42,7 +41,6 @@ regen-devcontainer:
 	cp -r templates/. .devcontainer/
 	cp config/allowlist.txt .devcontainer/allowlist.txt
 	chmod +x .devcontainer/init-firewall.sh
-	chmod +x .devcontainer/autonomous/init-firewall.sh
 
 test:
 	bats test/
