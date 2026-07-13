@@ -101,6 +101,18 @@ with this repo's GitHub Issues and PRs as its task queue and its way to ask
 you questions. Think of it as directing a team of junior engineers rather
 than pairing on every line.
 
+`--dsp` starts exactly one session in a persistent tmux session; it doesn't
+make anything poll GitHub on a schedule by itself. `CLAUDE.md`'s operating
+instructions tell that first session to check whether a recurring schedule
+already exists for the project and, if not, set one up itself (using its
+own scheduling tooling) before doing anything else, so the issue queue
+actually gets checked over time rather than only whenever a human happens
+to reopen the session. `dco` deliberately doesn't implement its own
+scheduling mechanism for this: Claude Code's own scheduling primitives
+already handle session resumption and auth properly, and reimplementing
+that as a host-side cron job inside `dco` would just be a less robust
+version of the same thing.
+
 Running with zero prompts only makes sense alongside a few other things:
 
 1. **A real firewall.** Autonomous mode flips network posture from this
