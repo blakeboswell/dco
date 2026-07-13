@@ -10,6 +10,13 @@ than one-off. It's built on the
 
 - [Docker](https://www.docker.com/)
 - `@devcontainers/cli`: `npm install -g @devcontainers/cli` (needs Node >= 20)
+- [`gh`](https://cli.github.com/) >= 2.29.0, for autonomous mode (`--dsp`) only:
+  repo creation, the PAT setup flow, and bootstrapping the `ready`/etc.
+  labels all need `gh label`, added in 2.29.0. Distro-packaged `gh` (e.g.
+  Ubuntu's apt archive) is often years stale; if `gh label create` errors
+  with `unknown command "label"`, switch to
+  [GitHub's own apt repo](https://cli.github.com/) rather than trying to
+  upgrade the distro package.
 
 ## Install
 
