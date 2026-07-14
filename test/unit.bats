@@ -316,3 +316,58 @@ setup_git_repo_with_commit() {
   DCO_GITHUB_HANDLE="octocat" scaffold_named_subconfig "autonomous" "$dest"
   grep -q "octocat" "$dest/CLAUDE.md"
 }
+
+# ── scaffold self-consistency ─────────────────────────────────────────────
+# Static check with zero Docker/network involved: does a freshly scaffolded
+# devcontainer.json's "dockerfile" actually resolve to a file that exists?
+# This is exactly the class of bug that twice took a multi-minute real
+# Docker cycle to surface (a shared top-level Dockerfile missing because a
+# named sub-config was scaffolded without it) -- checkable in milliseconds
+# instead, so it doesn't need a live e2e run to catch again.
+
+# prints why it failed on stderr before returning 1, since plain bats-core
+# (no bats-assert loaded) has no `fail`-with-message builtin; any nonzero
+# return from a direct call in a test body fails that test, same as `run`
+# would, and bats shows this output alongside the failure
+assert_dockerfile_resolves() {
+  local devcontainer_json="$1" dockerfile resolved
+  dockerfile="$(jq -r '.build.dockerfile // empty' "$devcontainer_json")"
+  if [[ -z "$dockerfile" ]]; then
+    echo "no .build.dockerfile in $devcontainer_json" >&2
+    return 1
+  fi
+  resolved="$(dirname "$devcontainer_json")/$dockerfile"
+  if [[ ! -f "$resolved" ]]; then
+    echo "$devcontainer_json points \"dockerfile\": \"$dockerfile\" at $resolved, which doesn't exist" >&2
+    return 1
+  fi
+}
+
+@test "the default profile's scaffolded dockerfile reference resolves" {
+  command -v jq &>/dev/null || skip "jq not installed"
+  dest="$BATS_TEST_TMPDIR/.devcontainer"
+  scaffold_devcontainer "$dest"
+  assert_dockerfile_resolves "$dest/devcontainer.json"
+}
+
+@test "the autonomous profile's scaffolded dockerfile reference resolves, fresh workspace" {
+  # mirrors main()'s actual sequence for a workspace that's never had the
+  # default profile scaffolded: the shared top-level files have to be
+  # created alongside the sub-config, not just the sub-config itself
+  command -v jq &>/dev/null || skip "jq not installed"
+  dest="$BATS_TEST_TMPDIR/.devcontainer"
+  scaffold_devcontainer "$dest"
+  scaffold_named_subconfig "autonomous" "$dest/autonomous"
+  assert_dockerfile_resolves "$dest/autonomous/devcontainer.json"
+}
+
+@test "every shipped profile's dockerfile reference resolves against the source templates" {
+  # catches the same bug class one step earlier: even before anything is
+  # scaffolded into a project, does templates/<profile>/devcontainer.json's
+  # own "dockerfile" path resolve within templates/ itself?
+  command -v jq &>/dev/null || skip "jq not installed"
+  for devcontainer_json in "$SHAREDIR"/templates/devcontainer.json "$SHAREDIR"/templates/*/devcontainer.json; do
+    [[ -f "$devcontainer_json" ]] || continue
+    assert_dockerfile_resolves "$devcontainer_json"
+  done
+}

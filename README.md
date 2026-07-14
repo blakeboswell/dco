@@ -244,6 +244,24 @@ exercises `make install`/`uninstall` against an isolated temp prefix. None
 of the suite touches this repo's own `.devcontainer/`, `~/.local`, or your
 real git config.
 
+Because `devcontainer`/`docker` are mocked, `make test` verifies `dco`
+calls the right commands, but not that the resulting file layout would
+actually build: a shipped profile's `devcontainer.json` pointing
+`"dockerfile"` at a file that doesn't exist in the scaffolded tree slips
+straight through mocks that never read a Dockerfile. `test/unit.bats`
+also statically checks that every shipped profile's `dockerfile` reference
+resolves to a real file, both from the source templates and after a fresh
+scaffold, to catch that class of bug in milliseconds instead of a
+multi-minute real Docker cycle.
+
+`make check-domains` resolves every domain in the shipped allowlists over
+a real DNS query. Not part of `make test` since it needs actual network
+access; run it after adding or changing anything in `config/allowlist.txt`
+or `templates/autonomous/allowlist.txt`. A domain that looks right but
+returns NXDOMAIN is otherwise only discoverable inside a restricted
+autonomous container, where the only signal is an unattributable
+"failed to resolve" firewall error.
+
 For changes that touch the interactive/autonomous-mode paths (`gh repo
 create`, PAT setup, the live firewall), see
 [`docs/e2e-runbook.md`](docs/e2e-runbook.md): a manual walkthrough that

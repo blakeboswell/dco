@@ -13,13 +13,17 @@
 # firewall ever turns on (postStartCommand runs after the container starts).
 # This list only matters for things Claude does live during a session.
 #
-# NOTE: the exact Anthropic API/telemetry domains below are asserted from a
-# known reference firewall pattern, not independently verified against the
-# currently-installed Claude Code version. If you see blocked-connection
-# errors in a real autonomous session, that's the first place to check.
+# NOTE: every domain below is checked for actual DNS resolution by
+# test/check-allowlist-domains.sh (`make check-domains`) -- run that after
+# adding or changing anything here. statsig.anthropic.com used to be listed
+# alongside api.anthropic.com on the assumption it was Anthropic's telemetry
+# endpoint; it returned NXDOMAIN from three independent resolvers when
+# actually checked, so it was never reachable and has been removed. If you
+# see blocked-connection errors in a real autonomous session that aren't
+# caught by that script, the domain may be right but the reference this
+# list was built from wasn't independently verified beyond DNS resolution.
 
 api.anthropic.com
-statsig.anthropic.com
 sentry.io
 
 # npm installs (Node tooling is baked into every dco image)
