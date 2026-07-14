@@ -193,8 +193,34 @@ setup() {
   DCO_GITHUB_TOKEN="fake-token" run main "$WS" --dsp < /dev/null
   [ "$status" -eq 0 ]
   [ -f "$WS/.devcontainer/autonomous/devcontainer.json" ]
-  # never touches/creates a top-level default profile
-  [ ! -f "$WS/.devcontainer/devcontainer.json" ]
+  # the autonomous profile's "dockerfile": "../Dockerfile" depends on the
+  # shared top-level Dockerfile existing, so a genuinely fresh workspace
+  # (never scaffolded via plain `dco`) must get it too, or the real
+  # devcontainer CLI fails later with a Docker "no such file" error that
+  # a mocked devcontainer/docker never catches
+  [ -f "$WS/.devcontainer/Dockerfile" ]
+  [ -f "$WS/.devcontainer/init-firewall.sh" ]
+}
+
+@test "--sub-config on a fresh workspace scaffolds the shared top-level files it depends on" {
+  run main "$WS" --sub-config autonomous
+  [ "$status" -eq 0 ]
+  [ -f "$WS/.devcontainer/autonomous/devcontainer.json" ]
+  [ -f "$WS/.devcontainer/Dockerfile" ]
+}
+
+@test "--sub-config does not touch an existing customized top-level devcontainer.json" {
+  mkdir -p "$WS/.devcontainer"
+  echo '{"marker":"hand-customized"}' > "$WS/.devcontainer/devcontainer.json"
+  run main "$WS" --sub-config autonomous
+  [ "$status" -eq 0 ]
+  [ -f "$WS/.devcontainer/autonomous/devcontainer.json" ]
+  run cat "$WS/.devcontainer/devcontainer.json"
+  [[ "$output" == *"hand-customized"* ]]
+  # a hand-edited top-level config might not have a Dockerfile of its own
+  # (e.g. an inline "image" instead of a build) -- that's the user's setup
+  # to fix, not something this codepath should silently paper over
+  [ ! -f "$WS/.devcontainer/Dockerfile" ]
 }
 
 @test "--sub-config overrides --dsp's autonomous default" {

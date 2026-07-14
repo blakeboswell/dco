@@ -409,6 +409,18 @@ fi
 if [[ -n "$SUB_CONFIG" ]]; then
   CONFIG="$WORKSPACE/.devcontainer/$SUB_CONFIG/devcontainer.json"
   if [[ ! -f "$CONFIG" ]]; then
+    # shipped named sub-configs (e.g. autonomous) point "dockerfile" at the
+    # shared top-level ../Dockerfile, which only exists once the default
+    # profile has been scaffolded. A project whose first-ever dco
+    # invocation is --dsp (skipping plain `dco` entirely) would otherwise
+    # scaffold only .devcontainer/<name>/ and fail later with a Docker
+    # "no such file" error on a Dockerfile that was never created. Scaffold
+    # the shared top-level files first in that case, without touching an
+    # existing top-level devcontainer.json/Dockerfile if one's already there.
+    if [[ ! -f "$WORKSPACE/.devcontainer/devcontainer.json" ]]; then
+      info "no .devcontainer/devcontainer.json found — scaffolding the shared top-level files the '$SUB_CONFIG' profile depends on"
+      scaffold_devcontainer "$WORKSPACE/.devcontainer"
+    fi
     DEST="$WORKSPACE/.devcontainer/$SUB_CONFIG"
     if scaffold_named_subconfig "$SUB_CONFIG" "$DEST"; then
       info "no .devcontainer/$SUB_CONFIG found — scaffolded from the shipped '$SUB_CONFIG' profile"
