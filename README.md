@@ -79,33 +79,10 @@ hand-edited, refresh it with `dco --regen [path]` and then `dco --rebuild`.
 
 ## Network firewall
 
-Every profile ships with an optional default-deny network firewall:
-`init-firewall.sh` runs as a `postStartCommand` and, if the resolved
-config's `allowlist.txt` has any active (non-comment, non-blank) entries,
-locks outbound network access down to just those domains plus GitHub's own
-IP ranges (always allowed, for git/`gh`). An empty allowlist, what the
-default profile ships with, makes it a complete no-op, so `dco` is
-open-by-default until you opt in.
-
-To enable it for a project: add domains to `.devcontainer/allowlist.txt`
-(or `config/allowlist.txt` before `make install`, to change the default for
-every new project) and `dco --rebuild`. `allowlist.txt` is baked into the
-image at build time, not bind-mounted, so a plain edit needs a rebuild to
-take effect. `make check-domains` resolves every entry over a real DNS
-query, worth running after adding one: a domain that looks right but
-doesn't actually resolve is otherwise only discoverable as an opaque
-firewall failure at container start. A domain that still won't resolve
-after a few retries is skipped with a warning rather than aborting the
-whole container, so one flaky lookup doesn't take down the entire launch.
-
-`init-firewall.sh` itself is deliberately not bind-mounted: a container
-user with write access to it, combined with the passwordless `sudo`
-`postStartCommand` needs to run it, would be a straightforward privilege
-escalation. That means there's only ever one copy,
-`.devcontainer/init-firewall.sh` at the top level, shared by every
-sub-config regardless of which one's active; `dco --regen [path]`
-refreshes it, even though `--regen` otherwise only touches the top-level
-`.devcontainer/`.
+Every profile ships with an optional default-deny firewall: populate
+`.devcontainer/allowlist.txt` with the domains it needs, then
+`dco --rebuild` (empty, the default, means fully open). `make
+check-domains` verifies every entry actually resolves.
 
 ## Git identity
 
