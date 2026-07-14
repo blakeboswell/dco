@@ -42,6 +42,7 @@ dco [path] [flags]
 | `--purge` | Like `--stop`, but also deletes its volumes (bash history, Claude's memory). Irreversible, always confirms first |
 | `-g`, `--regen` | Refresh a project's `.devcontainer/` from the latest templates |
 | `--sub-config <name>` | Use `.devcontainer/<name>/devcontainer.json` instead of the default profile. Not scaffolded for you: commit that file yourself first |
+| `--up-only` | Bring the container up (volumes, git identity synced) and exit, without attaching — for headless callers driving their own `devcontainer exec`. Mutually exclusive with `-c`/`--claude` |
 | `-l`, `--list` | List all running devcontainers |
 | `-h`, `--help` | Show help |
 

@@ -186,6 +186,32 @@ setup() {
   mock_called_with "tmux new-session -A -s claude claude"
 }
 
+# ── --up-only (headless bring-up, no attach) ──────────────────────────────
+
+@test "--up-only brings the container up and exits without attaching" {
+  run main "$WS" --up-only
+  [ "$status" -eq 0 ]
+  mock_called_with "devcontainer up"
+  ! mock_called_with "-- bash"
+  ! mock_called_with "tmux new-session"
+}
+
+@test "--up-only still syncs git identity before exiting" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME"
+  git config --global user.name "Test User"
+  git config --global user.email "test@example.com"
+  run main "$WS" --up-only
+  [ "$status" -eq 0 ]
+  mock_called_with "git config --global user.name Test User"
+}
+
+@test "--up-only and --claude are mutually exclusive" {
+  run main "$WS" --up-only --claude
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"mutually exclusive"* ]]
+}
+
 # ── git identity sync ─────────────────────────────────────────────────────
 
 @test "syncs host git user.name/user.email into the container via devcontainer exec" {

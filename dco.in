@@ -95,6 +95,10 @@ Flags:
                   default profile. If your project has committed its own
                   template under .devcontainer/<name>/, that's used as-is;
                   dco itself ships no named profiles to scaffold
+      --up-only   Bring the container up (volumes, git identity synced) and
+                  exit, without attaching. For headless callers that drive
+                  their own `devcontainer exec` afterward. Mutually
+                  exclusive with --claude
   -l, --list      List all running devcontainers
   -h, --help      Show this help
 
@@ -113,6 +117,7 @@ Examples:
   dco --purge ~/projects/trading   # also delete its volumes (irreversible)
   dco --regen ~/projects/trading   # refresh that project's .devcontainer/ from templates
   dco --list                       # show all running devcontainers
+  dco --sub-config eigen --up-only # bring up a headless-driven container, don't attach
 
 Shell function (add to .zshrc):
   cdco() { cd "$1" && dco "${@:2}"; }
@@ -135,6 +140,7 @@ STOP=false
 PURGE=false
 REGEN=false
 LIST=false
+UP_ONLY=false
 SUB_CONFIG=""
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
@@ -145,6 +151,7 @@ while [[ $# -gt 0 ]]; do
     --purge)      PURGE=true ;;
     --regen|-g)   REGEN=true ;;
     --list|-l)    LIST=true ;;
+    --up-only)    UP_ONLY=true ;;
     --sub-config)
       [[ $# -ge 2 ]] || die "--sub-config needs a value, e.g. --sub-config gpu-trading"
       SUB_CONFIG="$2"
@@ -155,6 +162,8 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+$UP_ONLY && $LAUNCH_CLAUDE && die "--up-only and --claude are mutually exclusive"
 
 # ── list mode ─────────────────────────────────────────────────────────────────
 if $LIST; then
@@ -326,6 +335,15 @@ GIT_EMAIL="$(git -C "$WORKSPACE" config user.email 2>/dev/null || true)"
   -- git config --global user.name "$GIT_NAME" &>/dev/null
 [[ -n "$GIT_EMAIL" ]] && devcontainer exec --workspace-folder "$WORKSPACE" --config "$CONFIG" \
   -- git config --global user.email "$GIT_EMAIL" &>/dev/null
+
+# ── up-only: return control instead of attaching ──────────────────────────────
+# for callers driving the container headlessly (e.g. Eigen's autonomous loop)
+# that want it up, with volumes/git identity resolved, but no interactive
+# shell attached — they run their own `devcontainer exec` per turn afterward.
+if $UP_ONLY; then
+  info "container ready for $WORKSPACE (up-only, not attaching)"
+  exit 0
+fi
 
 # ── exec in ───────────────────────────────────────────────────────────────────
 SHELL_CMD="bash"
