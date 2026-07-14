@@ -249,3 +249,8 @@ create`, PAT setup, the live firewall), see
 [`docs/e2e-runbook.md`](docs/e2e-runbook.md): a manual walkthrough that
 creates a real throwaway GitHub repo and exercises the full `--dsp` setup
 flow, since that can't be mocked the way `make test` mocks it.
+`docs/e2e-runbook.sh` automates most of the same steps as resumable
+subcommands (`setup`, `file-issue`, `check`, `verify-firewall`,
+`cleanup`); the genuinely interactive parts (confirming repo creation,
+pasting a PAT) still surface normally since they're `dco --dsp`'s own
+prompts, not something the script can or should skip.
