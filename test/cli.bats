@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # CLI-level tests — exercise main() end-to-end (arg parsing, mode dispatch,
-# config resolution, --dsp guardrails) against mocked docker/devcontainer/gh
-# so no real container is ever built.
+# config resolution) against mocked docker/devcontainer binaries in
+# test/mocks/ so no real container is ever built.
 
 load test_helper
 
@@ -106,17 +106,12 @@ setup() {
   [[ "$output" == *"existing"* ]]
 }
 
-@test "scaffolds the shipped 'autonomous' sub-config on first use via --sub-config" {
-  run main "$WS" --sub-config autonomous
-  [ "$status" -eq 0 ]
-  [ -f "$WS/.devcontainer/autonomous/devcontainer.json" ]
-}
-
-@test "dies with the list of shipped profiles for an unknown --sub-config name" {
+@test "--sub-config dies if the named profile doesn't already exist" {
+  # dco ships no named profiles of its own -- a sub-config has to already
+  # be committed in the project, there's nothing to scaffold it from
   run main "$WS" --sub-config not-a-real-profile
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no shipped profile named 'not-a-real-profile'"* ]]
-  [[ "$output" == *"autonomous"* ]]
+  [[ "$output" == *"no .devcontainer/not-a-real-profile/devcontainer.json found"* ]]
 }
 
 @test "--sub-config dies if given with no value" {
@@ -126,22 +121,49 @@ setup() {
 }
 
 @test "dies with a migration hint on a stray second positional argument" {
-  run main "$WS" autonomous
+  run main "$WS" custom
   [ "$status" -eq 1 ]
   [[ "$output" == *"too many arguments"* ]]
   [[ "$output" == *"--sub-config"* ]]
 }
 
+@test "--sub-config scaffolds the shared top-level files a committed sub-config depends on" {
+  # a project commits its own .devcontainer/<name>/devcontainer.json (dco
+  # doesn't scaffold this part); if that config shares the top-level
+  # ../Dockerfile the way dco's own default profile is laid out, the
+  # shared files still need to exist on a genuinely fresh workspace
+  mkdir -p "$WS/.devcontainer/custom"
+  echo '{"build":{"dockerfile":"../Dockerfile"}}' > "$WS/.devcontainer/custom/devcontainer.json"
+  run main "$WS" --sub-config custom
+  [ "$status" -eq 0 ]
+  [ -f "$WS/.devcontainer/Dockerfile" ]
+  [ -f "$WS/.devcontainer/init-firewall.sh" ]
+}
+
+@test "--sub-config does not touch an existing customized top-level devcontainer.json" {
+  mkdir -p "$WS/.devcontainer/custom"
+  echo '{"marker":"hand-customized"}' > "$WS/.devcontainer/devcontainer.json"
+  echo '{}' > "$WS/.devcontainer/custom/devcontainer.json"
+  run main "$WS" --sub-config custom
+  [ "$status" -eq 0 ]
+  run cat "$WS/.devcontainer/devcontainer.json"
+  [[ "$output" == *"hand-customized"* ]]
+  # a hand-edited top-level config might not have a Dockerfile of its own
+  # (e.g. an inline "image" instead of a build) -- that's the user's setup
+  # to fix, not something this codepath should silently paper over
+  [ ! -f "$WS/.devcontainer/Dockerfile" ]
+}
+
 @test "surfaces an existing named sub-config, then still scaffolds the default when none was requested" {
-  mkdir -p "$WS/.devcontainer/autonomous"
-  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
+  mkdir -p "$WS/.devcontainer/custom"
+  echo '{}' > "$WS/.devcontainer/custom/devcontainer.json"
   run main "$WS"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"also has sub-config(s) here: autonomous"* ]]
+  [[ "$output" == *"also has sub-config(s) here: custom"* ]]
   [ -f "$WS/.devcontainer/devcontainer.json" ]
   # the pre-existing sub-config must be untouched, not overwritten by the
   # default-profile scaffold (scaffold_devcontainer skips subdirectories)
-  run cat "$WS/.devcontainer/autonomous/devcontainer.json"
+  run cat "$WS/.devcontainer/custom/devcontainer.json"
   [ "$output" = "{}" ]
 }
 
@@ -156,138 +178,12 @@ setup() {
   [[ "$output" != "stale" ]]
 }
 
-# ── --dsp guardrails ──────────────────────────────────────────────────────
+# ── --claude (persistent tmux session) ────────────────────────────────────
 
-@test "--dsp dies when the workspace is not a git repo" {
-  run main "$WS" --dsp
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"needs"*"to already be a git repo"* ]]
-}
-
-@test "--dsp dies non-interactively when there's no GitHub remote" {
-  git -C "$WS" init -q
-  run main "$WS" --dsp < /dev/null
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"no GitHub remote"* ]]
-}
-
-@test "--dsp warns and dies non-interactively when a container is already running for this profile" {
-  MOCK_DOCKER_CONTAINER_ID="abc123" run main "$WS" --dsp < /dev/null
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"already running"* ]]
-  [[ "$output" == *"aborted"* ]]
-}
-
-@test "--dsp proceeds past the running-container warning when confirmed" {
-  git -C "$WS" init -q
-  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
-  MOCK_DOCKER_CONTAINER_ID="abc123" DCO_GITHUB_TOKEN="fake-token" \
-    run main "$WS" --dsp <<< "y"
+@test "--claude attaches to a persistent tmux session" {
+  run main "$WS" --claude
   [ "$status" -eq 0 ]
-  mock_called_with "devcontainer up"
-}
-
-@test "--dsp defaults to the 'autonomous' sub-config when none is given" {
-  git -C "$WS" init -q
-  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
-  DCO_GITHUB_TOKEN="fake-token" run main "$WS" --dsp < /dev/null
-  [ "$status" -eq 0 ]
-  [ -f "$WS/.devcontainer/autonomous/devcontainer.json" ]
-  # the autonomous profile's "dockerfile": "../Dockerfile" depends on the
-  # shared top-level Dockerfile existing, so a genuinely fresh workspace
-  # (never scaffolded via plain `dco`) must get it too, or the real
-  # devcontainer CLI fails later with a Docker "no such file" error that
-  # a mocked devcontainer/docker never catches
-  [ -f "$WS/.devcontainer/Dockerfile" ]
-  [ -f "$WS/.devcontainer/init-firewall.sh" ]
-}
-
-@test "--sub-config on a fresh workspace scaffolds the shared top-level files it depends on" {
-  run main "$WS" --sub-config autonomous
-  [ "$status" -eq 0 ]
-  [ -f "$WS/.devcontainer/autonomous/devcontainer.json" ]
-  [ -f "$WS/.devcontainer/Dockerfile" ]
-}
-
-@test "--sub-config does not touch an existing customized top-level devcontainer.json" {
-  mkdir -p "$WS/.devcontainer"
-  echo '{"marker":"hand-customized"}' > "$WS/.devcontainer/devcontainer.json"
-  run main "$WS" --sub-config autonomous
-  [ "$status" -eq 0 ]
-  [ -f "$WS/.devcontainer/autonomous/devcontainer.json" ]
-  run cat "$WS/.devcontainer/devcontainer.json"
-  [[ "$output" == *"hand-customized"* ]]
-  # a hand-edited top-level config might not have a Dockerfile of its own
-  # (e.g. an inline "image" instead of a build) -- that's the user's setup
-  # to fix, not something this codepath should silently paper over
-  [ ! -f "$WS/.devcontainer/Dockerfile" ]
-}
-
-@test "--sub-config self-heals a workspace scaffolded before this fix existed" {
-  # simulates the exact broken state hit live: .devcontainer/<name>/ already
-  # scaffolded (so the "scaffold the sub-config" branch is skipped
-  # entirely), but the shared top-level files it depends on were never
-  # created. Must self-heal on the very next launch, not just on a fresh
-  # scaffold, since the sub-config's own devcontainer.json already existing
-  # would otherwise mask the missing Dockerfile forever.
-  mkdir -p "$WS/.devcontainer/autonomous"
-  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
-  [ ! -f "$WS/.devcontainer/Dockerfile" ]
-  run main "$WS" --sub-config autonomous
-  [ "$status" -eq 0 ]
-  [ -f "$WS/.devcontainer/Dockerfile" ]
-}
-
-@test "--sub-config overrides --dsp's autonomous default" {
-  git -C "$WS" init -q
-  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
-  mkdir -p "$WS/.devcontainer/custom"
-  echo "example.com" > "$WS/.devcontainer/custom/allowlist.txt"
-  echo '{}' > "$WS/.devcontainer/custom/devcontainer.json"
-  DCO_GITHUB_TOKEN="fake-token" run main "$WS" --dsp --sub-config custom < /dev/null
-  [ "$status" -eq 0 ]
-  mock_called_with "devcontainer up"
-  [ ! -d "$WS/.devcontainer/autonomous" ]
-}
-
-@test "--dsp dies when the resolved allowlist has no active entries" {
-  git -C "$WS" init -q
-  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
-  # pre-create the autonomous profile with an emptied allowlist, simulating
-  # someone having stripped it down (the shipped one ships pre-populated)
-  mkdir -p "$WS/.devcontainer/autonomous"
-  : > "$WS/.devcontainer/autonomous/allowlist.txt"
-  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
-  run main "$WS" --dsp < /dev/null
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"no active entries"* ]]
-}
-
-@test "--dsp dies non-interactively when DCO_GITHUB_TOKEN is unset, even with a good allowlist" {
-  git -C "$WS" init -q
-  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
-  mkdir -p "$WS/.devcontainer/autonomous"
-  echo "example.com" > "$WS/.devcontainer/autonomous/allowlist.txt"
-  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
-  unset DCO_GITHUB_TOKEN
-  run main "$WS" --dsp < /dev/null
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"DCO_GITHUB_TOKEN is not set"* ]]
-}
-
-@test "--dsp proceeds once git remote, allowlist, and token are all satisfied" {
-  git -C "$WS" init -q
-  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
-  mkdir -p "$WS/.devcontainer/autonomous"
-  echo "example.com" > "$WS/.devcontainer/autonomous/allowlist.txt"
-  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
-  DCO_GITHUB_TOKEN="fake-token" run main "$WS" --dsp < /dev/null
-  [ "$status" -eq 0 ]
-  mock_called_with "devcontainer up"
-  # the label taxonomy CLAUDE.md depends on gets bootstrapped every launch,
-  # not just when the remote was freshly created
-  mock_called_with "gh label create ready --repo blakeboswell/dco"
-  mock_called_with "gh label create blocked --repo blakeboswell/dco"
+  mock_called_with "tmux new-session -A -s claude claude"
 }
 
 # ── git identity sync ─────────────────────────────────────────────────────
@@ -303,26 +199,4 @@ setup() {
   [ "$status" -eq 0 ]
   mock_called_with "git config --global user.name Test User"
   mock_called_with "git config --global user.email test@example.com"
-}
-
-# ── bootstrap prompt ───────────────────────────────────────────────────────
-
-@test "--dsp launches claude with a bootstrap prompt, as one argument" {
-  git -C "$WS" init -q
-  git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"
-  mkdir -p "$WS/.devcontainer/autonomous"
-  echo "example.com" > "$WS/.devcontainer/autonomous/allowlist.txt"
-  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
-  DCO_GITHUB_TOKEN="fake-token" run main "$WS" --dsp < /dev/null
-  [ "$status" -eq 0 ]
-  # the whole prompt must survive as a single argument through the
-  # composed tmux/bash -lc command line, not get word-split
-  mock_called_with "claude --dangerously-skip-permissions Follow\\ your\\ CLAUDE.md\\ operating\\ instructions:"
-}
-
-@test "plain --claude (no --dsp) launches claude with no bootstrap prompt" {
-  run main "$WS" --claude
-  [ "$status" -eq 0 ]
-  mock_called_with "tmux new-session -A -s claude claude"
-  ! mock_called_with "CLAUDE.md operating instructions"
 }

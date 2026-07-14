@@ -34,9 +34,9 @@ install_dco() {
   DCO_SHAREDIR="$DCO_PREFIX/share/dco"
 }
 
-# Prepends the fake docker/devcontainer/gh onto PATH and points them at a
+# Prepends the fake docker/devcontainer onto PATH and points them at a
 # fresh per-test log file, so tests can assert on what dco *would* have run
-# without touching real Docker or GitHub.
+# without touching real Docker.
 use_mocks() {
   MOCK_LOG="$BATS_TEST_TMPDIR/mock.log"
   : > "$MOCK_LOG"

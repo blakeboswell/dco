@@ -9,7 +9,7 @@ help:
 	@echo "make uninstall [PREFIX=...]   remove installed dco and \$$(SHAREDIR)"
 	@echo "make regen-devcontainer       regenerate this repo's own .devcontainer/ from templates/"
 	@echo "make test                     run the bats test suite (needs bats: npm install -g bats)"
-	@echo "make check-domains            resolve every shipped allowlist domain (needs real network + dig)"
+	@echo "make check-domains            resolve every config/allowlist.txt domain (needs real network + dig)"
 
 # Escaped for safe use inside a sed replacement (backslash, &, and the
 # s|...|...| delimiter all need escaping or PREFIX values containing them
@@ -32,11 +32,10 @@ uninstall:
 	rm -f "$(BINDIR)/dco"
 	rm -rf "$(SHAREDIR)"
 
-# NOTE: unlike dco.in's own scaffold_devcontainer()/scaffold_named_subconfig()
-# helpers, this target has no non-destructive guard — it always overwrites,
-# including any hand-customized .devcontainer/autonomous/CLAUDE.md in this
-# repo's own dogfooded copy. Recoverable via git (this repo is one), just
-# don't expect it to preserve local edits like the dco.in helpers do.
+# NOTE: unlike dco.in's own scaffold_devcontainer() helper, this target has
+# no non-destructive guard — it always overwrites this repo's own
+# dogfooded top-level .devcontainer/ files. Recoverable via git (this repo
+# is one), just don't expect it to preserve local edits.
 regen-devcontainer:
 	mkdir -p .devcontainer
 	cp -r templates/. .devcontainer/

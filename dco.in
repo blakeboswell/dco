@@ -13,8 +13,6 @@
 #   dco --purge [path]               # stop + also delete its volumes (bash history, Claude memory)
 #   dco --list                       # list running devcontainers
 #   dco --regen [path]               # refresh .devcontainer/ from latest templates
-#   dco --dsp                        # unattended Claude, GitHub-issue-driven (see README)
-#                                    # (defaults --sub-config to the shipped 'autonomous' profile)
 
 set -euo pipefail
 
@@ -25,13 +23,11 @@ die()  { echo "dco: error: $*" >&2; exit 1; }
 info() { echo "dco: $*" >&2; }
 
 # copies the latest templates/+config/ into <dest>, overwriting any
-# top-level files but leaving named sub-configs (<dest>/<name>/) alone.
-# Every directory directly under templates/ (e.g. templates/autonomous/) is
-# a named sub-config's own template, scaffolded separately by
-# scaffold_named_subconfig — copy only top-level files here, or `cp -r
-# templates/.` would recurse into an existing <dest>/autonomous/ and
-# silently clobber a hand-customized CLAUDE.md/allowlist.txt/etc with the
-# stock shipped versions.
+# top-level files but leaving named sub-configs (<dest>/<name>/) alone —
+# dco doesn't ship any of its own, but a project can commit its own
+# .devcontainer/<name>/ directory, and `cp -r templates/.` would otherwise
+# recurse into it and clobber a hand-written file with the stock top-level
+# one, so only top-level files are copied here.
 scaffold_devcontainer() {
   local dest="$1" entry
   [[ -d "$SHAREDIR/templates" ]] || \
@@ -47,130 +43,6 @@ scaffold_devcontainer() {
   chmod +x "$dest/init-firewall.sh"
 }
 
-# scaffolds a named sub-config profile (e.g. "autonomous") from
-# $SHAREDIR/templates/<name>/ into <dest>, if such a shipped profile exists.
-# Returns 1 (no die) if no shipped profile by that name exists, so callers
-# can fall back to their own "not found" handling.
-scaffold_named_subconfig() {
-  local name="$1" dest="$2"
-  local src="$SHAREDIR/templates/$name"
-  [[ -d "$src" ]] || return 1
-  mkdir -p "$dest"
-  cp -r "$src/." "$dest/"
-  [[ -f "$dest/init-firewall.sh" ]] && chmod +x "$dest/init-firewall.sh"
-  substitute_github_handle "$dest/CLAUDE.md"
-  return 0
-}
-
-# substitutes DCO_GITHUB_HANDLE into a CLAUDE.md's {{DCO_GITHUB_HANDLE}}
-# placeholder, if the file exists, the var is set, and the placeholder is
-# still present. No-op otherwise (safe to call speculatively).
-substitute_github_handle() {
-  local file="$1"
-  [[ -f "$file" && -n "${DCO_GITHUB_HANDLE:-}" ]] || return 0
-  grep -q '{{DCO_GITHUB_HANDLE}}' "$file" || return 0
-  sed -i.bak "s/{{DCO_GITHUB_HANDLE}}/${DCO_GITHUB_HANDLE//\//\\/}/g" "$file"
-  rm -f "$file.bak"
-}
-
-# best-effort "owner/repo" from a git repo's github.com "origin" remote,
-# for building a friendly token name/description. Empty output (not a die)
-# if there's no such remote; callers treat this as optional context.
-github_owner_repo() {
-  local dir="$1" remote_url
-  remote_url="$(git -C "$dir" remote get-url origin 2>/dev/null || true)"
-  [[ -n "$remote_url" ]] || return 1
-  remote_url="${remote_url%.git}"
-  case "$remote_url" in
-    git@github.com:*)       echo "${remote_url#git@github.com:}" ;;
-    ssh://git@github.com/*) echo "${remote_url#ssh://git@github.com/}" ;;
-    https://github.com/*)   echo "${remote_url#https://github.com/}" ;;
-    *) return 1 ;;
-  esac
-}
-
-# resolves a GitHub remote for --dsp interactively: if a repo of this name
-# already exists under the authenticated gh user, offers to add it as
-# origin and push to it; otherwise offers to create one fresh. A bare name
-# (no owner/) passed to `gh repo view` resolves against the authenticated
-# user's own account, so this only ever matches a repo you (or a prior dco
-# run) could plausibly have created here before, not some unrelated
-# same-named repo elsewhere — this is what makes retrying after a naming
-# collision (gh repo create failing with "already exists") resumable
-# instead of a dead end. Assumes the caller already confirmed stdin is a
-# tty and gh is installed; this function doesn't gate on either itself, so
-# it's callable directly (e.g. from tests) without a real tty.
-ensure_github_remote() {
-  local workspace="$1" repo_name="$2" existing name_with_owner ssh_url reply
-  existing="$(gh repo view "$repo_name" --json nameWithOwner,sshUrl --jq '[.nameWithOwner,.sshUrl] | @tsv' 2>/dev/null || true)"
-
-  if [[ -n "$existing" ]]; then
-    IFS=$'\t' read -r name_with_owner ssh_url <<< "$existing"
-    reply=""
-    read -r -p "dco: found an existing GitHub repo '$name_with_owner' — add it as origin and push? [y/N] " reply || true
-    [[ "$reply" =~ ^[Yy]$ ]] || die "--dsp needs a GitHub remote to work against; aborting."
-    git -C "$workspace" remote add origin "$ssh_url"
-    git -C "$workspace" push -u origin HEAD \
-      || die "push to existing repo '$name_with_owner' failed — it may have
-  history this checkout doesn't (e.g. from an earlier attempt). Check its
-  state on GitHub, then either pull/merge locally or delete it and retry."
-    info "added existing repo as origin and pushed: $name_with_owner"
-  else
-    reply=""
-    read -r -p "dco: create a private GitHub repo '$repo_name' and push? [gh repo create $repo_name --private --source=\"$workspace\" --remote=origin --push] [y/N] " reply || true
-    [[ "$reply" =~ ^[Yy]$ ]] || die "--dsp needs a GitHub remote to work against; aborting."
-    gh repo create "$repo_name" --private --source="$workspace" --remote=origin --push \
-      || die "gh repo create failed; create the GitHub repo yourself and retry."
-    info "created and pushed: $repo_name"
-  fi
-}
-
-# creates (or updates, via --force) the four labels templates/autonomous/CLAUDE.md's
-# operating instructions depend on, so a fresh repo works with autonomous
-# mode out of the box instead of silently never picking up any issue
-# because 'ready' doesn't exist yet. Idempotent and safe to call on every
-# --dsp launch, not just when the repo was just created. Best-effort: a
-# failure here (e.g. a transient API hiccup) is worth surfacing but
-# shouldn't block the whole launch the way the allowlist/token guardrails
-# do, so this warns rather than dies.
-ensure_labels() {
-  local owner_repo="$1" name color description failed=false
-  [[ -n "$owner_repo" ]] || return 0
-  while IFS='|' read -r name color description; do
-    gh label create "$name" --repo "$owner_repo" --color "$color" --description "$description" --force >/dev/null 2>&1 \
-      || failed=true
-  done <<'LABELS'
-ready|0e8a16|Vetted by a human as available for the autonomous agent to pick up
-in-progress|fbca04|The autonomous agent is actively working this
-in-review|0052cc|A PR is open for this issue, awaiting human review
-blocked|d93f0b|The agent has a specific question blocking progress — see the linked comment
-LABELS
-  if $failed; then
-    info "warning: failed to create/update one or more of the ready/in-progress/in-review/blocked labels on $owner_repo — autonomous mode depends on 'ready' existing and being applied to issues you want it to pick up"
-  fi
-  return 0
-}
-
-# minimal encoding for the plain identifier strings we build ourselves
-# (token names/descriptions) — not a general-purpose URL encoder
-url_encode() { printf '%s' "${1// /+}"; }
-
-# strips ANSI/CSI escape sequences and any other control characters from
-# pasted input before it's saved or used as an HTTP header value. A
-# terminal that emits a stray escape code mid-paste (e.g. a cursor-move
-# sequence from an arrow-key press) can otherwise corrupt a saved
-# DCO_GITHUB_TOKEN — `gh`/curl then fail every call with "invalid header
-# field value for Authorization", with no hint the token itself is the
-# problem. Note: an escape sequence's non-ESC bytes (e.g. the "[C" in the
-# cursor-forward code `ESC [ C`) are ordinary printable characters, so
-# stripping control characters alone leaves them behind; the CSI pattern
-# has to be matched and removed as a whole first.
-strip_control_chars() {
-  local s="$1"
-  s="$(printf '%s' "$s" | sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g')"
-  printf '%s' "$s" | tr -d '[:cntrl:]'
-}
-
 # replaces every character of $1 outside the $2 character class with '-'.
 # Deliberately takes a plain string rather than piping a command's output
 # through `tr -c ... '-'`: tr -c also complements the trailing newline that
@@ -179,22 +51,12 @@ strip_control_chars() {
 # substitution ($(...)) on the outside of this call, never the inside.
 slugify() { printf '%s' "${1//[^$2]/-}"; }
 
-# opens a URL in the host's default browser if a known opener exists;
-# silently does nothing otherwise (the caller already printed the URL)
-open_url() {
-  if command -v open &>/dev/null; then
-    open "$1" &>/dev/null &
-  elif command -v xdg-open &>/dev/null; then
-    xdg-open "$1" &>/dev/null &
-  fi
-}
-
 # unique-per-path-and-sub-config id for a project's named volumes
 # (bash-history, Claude config/memory) — derived from the full path (not
 # just the folder name) plus the sub-config name, so two differently-located
 # projects that share a directory name (e.g. two unrelated "api" checkouts)
-# never collide, and each named sub-config (e.g. "autonomous") for the same
-# project gets its own private volume instead of sharing the default one
+# never collide, and each named sub-config for the same project gets its
+# own private volume instead of sharing the default one
 project_id() {
   local workspace="$1" sub_config="${2:-}" hash slug id
   if command -v sha256sum &>/dev/null; then
@@ -228,12 +90,11 @@ Flags:
       --purge     Like --stop, but also delete its volumes (bash history,
                   Claude's memory) — irreversible, always confirms first
   -g, --regen     Refresh a project's .devcontainer/ from the latest templates
-      --dsp       Launch Claude with --dangerously-skip-permissions (implies
-                  --claude; defaults --sub-config to 'autonomous')
       --sub-config <name>
                   Use .devcontainer/<name>/devcontainer.json instead of the
-                  default profile, scaffolding it from a shipped template
-                  (currently just 'autonomous') if it doesn't exist yet
+                  default profile. If your project has committed its own
+                  template under .devcontainer/<name>/, that's used as-is;
+                  dco itself ships no named profiles to scaffold
   -l, --list      List all running devcontainers
   -h, --help      Show this help
 
@@ -241,13 +102,6 @@ Flags:
 attaches to an already-running session if one exists, or creates one.
 Detach with Ctrl-b then d — Claude keeps running in the container.
 Rerun `dco --claude` (same project) later to reattach to it.
-
---dsp runs Claude fully unattended, no tool-use prompts at all. Refuses
-to launch unless the workspace is a git repo with a GitHub remote, the
-resolved config's allowlist.txt is actually enforcing the firewall, and
-DCO_GITHUB_TOKEN is set. Run from a real terminal, it'll offer to create
-the GitHub repo (via `gh`) and walk you through generating a token if
-either is missing; see the README's Autonomous mode section for details.
 
 Examples:
   dco                              # shell in CWD's container
@@ -258,8 +112,6 @@ Examples:
   dco --stop ~/projects/trading    # remove that project's container
   dco --purge ~/projects/trading   # also delete its volumes (irreversible)
   dco --regen ~/projects/trading   # refresh that project's .devcontainer/ from templates
-  dco --dsp                        # unattended Claude, GitHub-issue-driven (--sub-config autonomous)
-  dco --sub-config autonomous      # plain shell in the autonomous profile, no --dsp
   dco --list                       # show all running devcontainers
 
 Shell function (add to .zshrc):
@@ -282,7 +134,6 @@ REBUILD=false
 STOP=false
 PURGE=false
 REGEN=false
-DSP=false
 LIST=false
 SUB_CONFIG=""
 POSITIONAL=()
@@ -293,10 +144,9 @@ while [[ $# -gt 0 ]]; do
     --stop|-s)    STOP=true ;;
     --purge)      PURGE=true ;;
     --regen|-g)   REGEN=true ;;
-    --dsp)        DSP=true; LAUNCH_CLAUDE=true ;;
     --list|-l)    LIST=true ;;
     --sub-config)
-      [[ $# -ge 2 ]] || die "--sub-config needs a value, e.g. --sub-config autonomous"
+      [[ $# -ge 2 ]] || die "--sub-config needs a value, e.g. --sub-config gpu-trading"
       SUB_CONFIG="$2"
       shift
       ;;
@@ -322,15 +172,6 @@ WORKSPACE="${POSITIONAL[0]:-$(pwd)}"
 WORKSPACE="$(realpath "$WORKSPACE")"
 
 [[ -d "$WORKSPACE" ]] || die "not a directory: $WORKSPACE"
-
-# --dsp defaults to the shipped 'autonomous' sub-config unless a different
-# one was explicitly requested with --sub-config: that's the profile with a
-# populated allowlist and the guardrail hook, which --dsp requires (see the
-# allowlist check below) — the default profile is open-by-design and can't
-# satisfy it.
-if $DSP && [[ -z "$SUB_CONFIG" ]]; then
-  SUB_CONFIG="autonomous"
-fi
 
 DCO_PROJECT_ID="$(project_id "$WORKSPACE" "$SUB_CONFIG")"
 export DCO_PROJECT_ID
@@ -407,47 +248,36 @@ fi
 
 # ── find config ───────────────────────────────────────────────────────────────
 if [[ -n "$SUB_CONFIG" ]]; then
-  # shipped named sub-configs (e.g. autonomous) point "dockerfile" at the
-  # shared top-level ../Dockerfile. Checked every time a sub-config is
-  # used, not just when scaffolding the sub-config itself: a workspace can
-  # be left with .devcontainer/<name>/ already scaffolded but the shared
-  # files still missing (e.g. from a run before this check existed, or any
-  # other reason the top-level dir is incomplete), and that workspace
-  # would otherwise stay broken forever, since the sub-config's own
-  # devcontainer.json already existing skips past the scaffold branch
-  # below entirely. Self-heals instead of requiring `dco --regen` by hand.
-  # Never touches an existing top-level devcontainer.json/Dockerfile.
+  # a sub-config can point "dockerfile" at the shared top-level ../Dockerfile
+  # (dco's own templates do). Checked every time a sub-config is used, not
+  # just when scaffolding it: a workspace can be left with
+  # .devcontainer/<name>/ already present but the shared files still
+  # missing, and that workspace would otherwise stay broken forever, since
+  # the sub-config's own devcontainer.json already existing skips past the
+  # scaffold branch below entirely. Self-heals instead of requiring
+  # `dco --regen` by hand. Never touches an existing top-level
+  # devcontainer.json/Dockerfile.
   if [[ ! -f "$WORKSPACE/.devcontainer/devcontainer.json" ]]; then
     info "no .devcontainer/devcontainer.json found — scaffolding the shared top-level files sub-configs may depend on"
     scaffold_devcontainer "$WORKSPACE/.devcontainer"
   fi
 
   CONFIG="$WORKSPACE/.devcontainer/$SUB_CONFIG/devcontainer.json"
-  if [[ ! -f "$CONFIG" ]]; then
-    DEST="$WORKSPACE/.devcontainer/$SUB_CONFIG"
-    if scaffold_named_subconfig "$SUB_CONFIG" "$DEST"; then
-      info "no .devcontainer/$SUB_CONFIG found — scaffolded from the shipped '$SUB_CONFIG' profile"
-    else
-      SHIPPED=("$SHAREDIR"/templates/*/)
-      if [[ -d "${SHIPPED[0]:-}" ]]; then
-        NAMES=()
-        for d in "${SHIPPED[@]}"; do NAMES+=("$(basename "$d")"); done
-        die "no .devcontainer/$SUB_CONFIG found, and no shipped profile named '$SUB_CONFIG' exists. Available shipped profiles: ${NAMES[*]}"
-      else
-        die "no .devcontainer/$SUB_CONFIG found, and no shipped named profiles are available"
-      fi
-    fi
-  fi
+  [[ -f "$CONFIG" ]] || \
+    die "no .devcontainer/$SUB_CONFIG/devcontainer.json found. dco ships no named
+  profiles to scaffold — commit your own .devcontainer/$SUB_CONFIG/devcontainer.json
+  first (it can share the top-level Dockerfile via \"dockerfile\": \"../Dockerfile\",
+  the way the default profile's own Dockerfile is laid out)."
 elif [[ -f "$WORKSPACE/.devcontainer.json" ]]; then
   CONFIG="$WORKSPACE/.devcontainer.json"
 elif [[ -f "$WORKSPACE/.devcontainer/devcontainer.json" ]]; then
   CONFIG="$WORKSPACE/.devcontainer/devcontainer.json"
 else
   # no default profile yet and no --sub-config given: fall through to
-  # scaffolding the default. If other named sub-configs already exist
-  # (e.g. 'autonomous'), surface them first — plain `dco` always means
-  # "the default profile," but a project that's only ever run --dsp on
-  # this workspace shouldn't leave that fact invisible.
+  # scaffolding the default. If other named sub-configs already exist,
+  # surface them first — plain `dco` always means "the default profile,"
+  # but a project that's only ever used a named sub-config on this
+  # workspace shouldn't leave that fact invisible.
   OTHER_SUBCONFIGS=("$WORKSPACE"/.devcontainer/*/devcontainer.json)
   if [[ -f "${OTHER_SUBCONFIGS[0]:-}" ]]; then
     NAMES=()
@@ -464,112 +294,6 @@ fi
 
 [[ -f "$CONFIG" ]] || die "config not found: $CONFIG"
 info "using config: ${CONFIG#"$WORKSPACE/"}"
-
-# ── autonomous-mode guardrails ────────────────────────────────────────────────
-if $DSP; then
-  # devcontainer up tags each container with the exact config file it was
-  # started from, not just the workspace folder, so this only fires for a
-  # second launch of this *same* profile — a running default-profile
-  # container alongside a new autonomous one is unaffected. Not a data-loss
-  # risk either way (branches are independent, PR-only/no-force-push/no-
-  # self-merge hold regardless), but two live agents against the same repo
-  # can duplicate work on the same issue and burn through the shared GitHub
-  # API rate limit faster, so this asks rather than silently doubling up.
-  RUNNING_CONTAINER="$(docker ps -q --filter "label=devcontainer.local_folder=$WORKSPACE" --filter "label=devcontainer.config_file=$CONFIG" 2>/dev/null || true)"
-  if [[ -n "$RUNNING_CONTAINER" ]]; then
-    info "warning: a container is already running for this exact profile ($CONFIG)."
-    REPLY=""
-    read -r -p "dco: another autonomous session may already be active — continue anyway? [y/N] " REPLY || true
-    [[ "$REPLY" =~ ^[Yy]$ ]] || die "aborted: a container is already running for $CONFIG. Run 'dco --stop' first, or confirm to run alongside it."
-  fi
-
-  [[ -d "$WORKSPACE/.git" ]] || die "--dsp needs $WORKSPACE to already be a git repo (run
-  'git init' and make an initial commit first) — autonomous mode's whole
-  workflow is git/GitHub-issue-driven."
-
-  if ! git -C "$WORKSPACE" remote -v 2>/dev/null | grep -q 'github\.com'; then
-    if [[ -t 0 ]] && command -v gh &>/dev/null; then
-      info "no GitHub remote found for $WORKSPACE."
-      ensure_github_remote "$WORKSPACE" "$(slugify "$(basename "$WORKSPACE")" 'a-zA-Z0-9._-')"
-    else
-      die "--dsp refuses to launch: $WORKSPACE has no GitHub remote, and this is either
-  non-interactive or 'gh' isn't installed on the host. Create the repo
-  yourself (gh repo create --source=. --remote=origin --push) and retry."
-    fi
-  fi
-
-  # every launch, not just when the remote was just created: covers a
-  # remote that was already there before dco was ever involved (e.g. added
-  # by hand), which would otherwise never get the labels CLAUDE.md's
-  # operating instructions depend on
-  command -v gh &>/dev/null && ensure_labels "$(github_owner_repo "$WORKSPACE" || true)"
-
-  ALLOWLIST_FILE="$(dirname "$CONFIG")/allowlist.txt"
-  ALLOWLIST_COUNT=0
-  if [[ -f "$ALLOWLIST_FILE" ]]; then
-    ALLOWLIST_COUNT="$(grep -vcE '^[[:space:]]*(#|$)' "$ALLOWLIST_FILE" 2>/dev/null || true)"
-    ALLOWLIST_COUNT="${ALLOWLIST_COUNT:-0}"
-  fi
-  if [[ "$ALLOWLIST_COUNT" -eq 0 ]]; then
-    die "--dsp refuses to launch: $ALLOWLIST_FILE has no active entries, so the
-  container firewall would be a complete no-op — Claude would run with
-  --dangerously-skip-permissions AND unrestricted network egress at the same
-  time. Add at least one domain to that file before retrying."
-  fi
-
-  ENV_FILE="$(dirname "$CONFIG")/.env.local"
-  if [[ -z "${DCO_GITHUB_TOKEN:-}" && -f "$ENV_FILE" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
-  fi
-
-  if [[ -z "${DCO_GITHUB_TOKEN:-}" ]]; then
-    if [[ -t 0 ]]; then
-      info "DCO_GITHUB_TOKEN is not set. Let's set one up."
-      OWNER_REPO="$(github_owner_repo "$WORKSPACE" || true)"
-      TOKEN_NAME="dco-autonomous-$(slugify "$(basename "$WORKSPACE")" 'a-zA-Z0-9-')"
-      TOKEN_DESC="dco autonomous mode${OWNER_REPO:+ for $OWNER_REPO}"
-      PAT_URL="https://github.com/settings/personal-access-tokens/new?name=$(url_encode "$TOKEN_NAME")&description=$(url_encode "$TOKEN_DESC")&expires_in=90&contents=write&issues=write&pull_requests=write"
-      info "opening a pre-filled token-creation page (pick just this repo, then Generate token):"
-      info "  $PAT_URL"
-      open_url "$PAT_URL"
-      DCO_GITHUB_TOKEN=""
-      read -r -s -p "dco: paste the generated token here (input hidden): " DCO_GITHUB_TOKEN || true
-      echo >&2
-      DCO_GITHUB_TOKEN="$(strip_control_chars "$DCO_GITHUB_TOKEN")"
-      [[ -n "$DCO_GITHUB_TOKEN" ]] || die "no token entered; aborting."
-      export DCO_GITHUB_TOKEN
-
-      if [[ -z "${DCO_GITHUB_HANDLE:-}" ]]; then
-        SUGGESTED_HANDLE=""
-        command -v gh &>/dev/null && SUGGESTED_HANDLE="$(gh api user --jq .login 2>/dev/null || true)"
-        HANDLE_INPUT=""
-        read -r -p "dco: your GitHub handle for @mentions${SUGGESTED_HANDLE:+ [$SUGGESTED_HANDLE]}: " HANDLE_INPUT || true
-        HANDLE_INPUT="$(strip_control_chars "$HANDLE_INPUT")"
-        DCO_GITHUB_HANDLE="${HANDLE_INPUT:-$SUGGESTED_HANDLE}"
-        [[ -n "$DCO_GITHUB_HANDLE" ]] && export DCO_GITHUB_HANDLE
-      fi
-
-      {
-        echo "DCO_GITHUB_TOKEN=$DCO_GITHUB_TOKEN"
-        [[ -n "${DCO_GITHUB_HANDLE:-}" ]] && echo "DCO_GITHUB_HANDLE=$DCO_GITHUB_HANDLE"
-      } > "$ENV_FILE"
-      chmod 600 "$ENV_FILE"
-
-      GITIGNORE_FILE="$(dirname "$ENV_FILE")/.gitignore"
-      grep -qxF ".env.local" "$GITIGNORE_FILE" 2>/dev/null || echo ".env.local" >> "$GITIGNORE_FILE"
-      info "saved to $ENV_FILE (chmod 600, gitignored via $GITIGNORE_FILE) — future launches won't ask again."
-
-      substitute_github_handle "$(dirname "$CONFIG")/CLAUDE.md"
-    else
-      die "--dsp refuses to launch: DCO_GITHUB_TOKEN is not set. Autonomous mode
-  is GitHub-issue-driven and needs a fine-grained PAT — see the README's
-  Autonomous mode section for setup."
-    fi
-  fi
-fi
 
 # ── ensure devcontainer CLI ───────────────────────────────────────────────────
 if ! command -v devcontainer &>/dev/null; then
@@ -599,20 +323,6 @@ GIT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
 # ── exec in ───────────────────────────────────────────────────────────────────
 SHELL_CMD="bash"
 CLAUDE_CMD="claude"
-if $DSP; then
-  # a bare `claude --dangerously-skip-permissions` just opens an interactive
-  # REPL and waits — Claude Code doesn't act on CLAUDE.md on its own without
-  # a first turn, so with nobody there to type one, it would just sit idle
-  # forever. Passing a prompt as a positional argument sends it as that
-  # first turn while staying interactive afterward (unlike -p/--print,
-  # which runs one-shot and exits) — this only fires on a genuinely fresh
-  # `tmux new-session`, since `-A` ignores the trailing command entirely
-  # when attaching to a session that already exists, so reattaching to a
-  # running agent never re-injects it mid-conversation.
-  BOOTSTRAP_PROMPT="Follow your CLAUDE.md operating instructions: check for an existing recurring schedule, set one up if none exists, then start the loop-priority checklist."
-  CLAUDE_CMD="claude --dangerously-skip-permissions $(printf '%q' "$BOOTSTRAP_PROMPT")"
-  info "autonomous mode: firewall enforcing, GH_TOKEN set, PR-only workflow, guardrail hook active — launching with --dangerously-skip-permissions and an initial bootstrap prompt"
-fi
 
 if $LAUNCH_CLAUDE; then
   info "attaching to tmux session 'claude' (creating it if needed; detach with Ctrl-b d)..."

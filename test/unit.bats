@@ -23,18 +23,6 @@ setup() {
   [ "$output" = "dco: hello" ]
 }
 
-# ── url_encode ────────────────────────────────────────────────────────────
-
-@test "url_encode replaces spaces with +" {
-  run url_encode "dco autonomous mode"
-  [ "$output" = "dco+autonomous+mode" ]
-}
-
-@test "url_encode is a no-op on strings without spaces" {
-  run url_encode "no-spaces-here"
-  [ "$output" = "no-spaces-here" ]
-}
-
 # ── slugify ───────────────────────────────────────────────────────────────
 
 @test "slugify replaces characters outside the given class with -" {
@@ -50,28 +38,6 @@ setup() {
 @test "slugify honors a narrower character class (no dot/underscore)" {
   run slugify "my_repo.name" 'a-zA-Z0-9-'
   [ "$output" = "my-repo-name" ]
-}
-
-# ── strip_control_chars ────────────────────────────────────────────────────
-
-@test "strip_control_chars removes a leading ANSI cursor-move sequence" {
-  run strip_control_chars "$(printf '\x1b[Cghp_abc123')"
-  [ "$output" = "ghp_abc123" ]
-}
-
-@test "strip_control_chars removes a trailing ANSI cursor-move sequence" {
-  run strip_control_chars "$(printf 'ghp_abc123\x1b[D')"
-  [ "$output" = "ghp_abc123" ]
-}
-
-@test "strip_control_chars leaves a clean token untouched" {
-  run strip_control_chars "ghp_cleantoken123"
-  [ "$output" = "ghp_cleantoken123" ]
-}
-
-@test "strip_control_chars strips embedded control characters too" {
-  run strip_control_chars "$(printf 'ghp_a\tb\nc')"
-  [ "$output" = "ghp_abc" ]
 }
 
 # ── project_id ────────────────────────────────────────────────────────────
@@ -91,8 +57,8 @@ setup() {
 }
 
 @test "project_id appends a sub-config slug when given one" {
-  run project_id "/home/me/projects/api" "autonomous"
-  [[ "$output" == *-autonomous ]]
+  run project_id "/home/me/projects/api" "gpu-trading"
+  [[ "$output" == *-gpu-trading ]]
 }
 
 @test "project_id sanitizes non-alphanumeric characters in the slug" {
@@ -100,163 +66,7 @@ setup() {
   [[ "$output" != *[!a-zA-Z0-9_.-]* ]]
 }
 
-# ── github_owner_repo ─────────────────────────────────────────────────────
-
-setup_git_remote() {
-  local dir="$BATS_TEST_TMPDIR/repo-$RANDOM"
-  mkdir -p "$dir"
-  git -C "$dir" init -q
-  git -C "$dir" remote add origin "$1"
-  printf '%s' "$dir"
-}
-
-@test "github_owner_repo parses an https remote" {
-  dir="$(setup_git_remote "https://github.com/blakeboswell/dco.git")"
-  run github_owner_repo "$dir"
-  [ "$status" -eq 0 ]
-  [ "$output" = "blakeboswell/dco" ]
-}
-
-@test "github_owner_repo parses an ssh (scp-style) remote" {
-  dir="$(setup_git_remote "git@github.com:blakeboswell/dco.git")"
-  run github_owner_repo "$dir"
-  [ "$status" -eq 0 ]
-  [ "$output" = "blakeboswell/dco" ]
-}
-
-@test "github_owner_repo parses an ssh:// remote" {
-  dir="$(setup_git_remote "ssh://git@github.com/blakeboswell/dco.git")"
-  run github_owner_repo "$dir"
-  [ "$status" -eq 0 ]
-  [ "$output" = "blakeboswell/dco" ]
-}
-
-@test "github_owner_repo fails on a non-github remote" {
-  dir="$(setup_git_remote "https://gitlab.com/blakeboswell/dco.git")"
-  run github_owner_repo "$dir"
-  [ "$status" -eq 1 ]
-  [ -z "$output" ]
-}
-
-@test "github_owner_repo fails when there is no origin remote" {
-  dir="$BATS_TEST_TMPDIR/no-remote"
-  mkdir -p "$dir"
-  git -C "$dir" init -q
-  run github_owner_repo "$dir"
-  [ "$status" -eq 1 ]
-}
-
-# ── ensure_github_remote ──────────────────────────────────────────────────
-# Note: this function has no [[ -t 0 ]] tty gate itself (that lives at its
-# call site in main()), so it's directly testable with piped stdin.
-
-setup_git_repo_with_commit() {
-  local dir="$BATS_TEST_TMPDIR/repo-$RANDOM"
-  mkdir -p "$dir"
-  git -C "$dir" init -q
-  git -C "$dir" -c user.email=t@example.com -c user.name=t commit --allow-empty -q -m init
-  printf '%s' "$dir"
-}
-
-@test "ensure_github_remote creates a new repo when none exists, when confirmed" {
-  use_mocks
-  dir="$(setup_git_repo_with_commit)"
-  run ensure_github_remote "$dir" "test-repo" <<< "y"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"created and pushed: test-repo"* ]]
-  mock_called_with "gh repo create test-repo --private --source=$dir --remote=origin --push"
-}
-
-@test "ensure_github_remote declines without creating when not confirmed" {
-  use_mocks
-  dir="$(setup_git_repo_with_commit)"
-  run ensure_github_remote "$dir" "test-repo" <<< "n"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"needs a GitHub remote to work against"* ]]
-  ! mock_called_with "gh repo create"
-}
-
-@test "ensure_github_remote adds an existing repo as origin and pushes, when confirmed" {
-  use_mocks
-  dir="$(setup_git_repo_with_commit)"
-  bare="$BATS_TEST_TMPDIR/remote.git"
-  git init -q --bare "$bare"
-  MOCK_GH_REPO_VIEW_NAME_WITH_OWNER="someone/test-repo" MOCK_GH_REPO_VIEW_SSH_URL="$bare" \
-    run ensure_github_remote "$dir" "test-repo" <<< "y"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"added existing repo as origin and pushed: someone/test-repo"* ]]
-  [ "$(git -C "$dir" remote get-url origin)" = "$bare" ]
-  ! mock_called_with "gh repo create"
-}
-
-@test "ensure_github_remote dies with a clear message if pushing to an existing repo fails" {
-  use_mocks
-  dir="$(setup_git_repo_with_commit)"
-  MOCK_GH_REPO_VIEW_NAME_WITH_OWNER="someone/test-repo" \
-    MOCK_GH_REPO_VIEW_SSH_URL="$BATS_TEST_TMPDIR/does-not-exist.git" \
-    run ensure_github_remote "$dir" "test-repo" <<< "y"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"push to existing repo 'someone/test-repo' failed"* ]]
-}
-
-# ── ensure_labels ──────────────────────────────────────────────────────────
-
-@test "ensure_labels creates all four labels the CLAUDE.md taxonomy depends on" {
-  use_mocks
-  ensure_labels "someone/test-repo"
-  mock_called_with "gh label create ready --repo someone/test-repo"
-  mock_called_with "gh label create in-progress --repo someone/test-repo"
-  mock_called_with "gh label create in-review --repo someone/test-repo"
-  mock_called_with "gh label create blocked --repo someone/test-repo"
-  mock_called_with "--force"
-}
-
-@test "ensure_labels is a no-op given an empty owner/repo" {
-  use_mocks
-  ensure_labels ""
-  [ ! -s "$MOCK_LOG" ]
-}
-
-@test "ensure_labels warns but does not die if label creation fails" {
-  use_mocks
-  MOCK_GH_LABEL_CREATE_EXIT=1 run ensure_labels "someone/test-repo"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"warning: failed to create/update"* ]]
-}
-
-# ── substitute_github_handle ──────────────────────────────────────────────
-
-@test "substitute_github_handle replaces the placeholder when the var is set" {
-  file="$BATS_TEST_TMPDIR/CLAUDE.md"
-  echo 'mention {{DCO_GITHUB_HANDLE}} on review' > "$file"
-  DCO_GITHUB_HANDLE="octocat" substitute_github_handle "$file"
-  run cat "$file"
-  [ "$output" = "mention octocat on review" ]
-}
-
-@test "substitute_github_handle is a no-op when the file doesn't exist" {
-  run substitute_github_handle "$BATS_TEST_TMPDIR/nope.md"
-  [ "$status" -eq 0 ]
-}
-
-@test "substitute_github_handle is a no-op when the var is unset" {
-  file="$BATS_TEST_TMPDIR/CLAUDE.md"
-  echo 'mention {{DCO_GITHUB_HANDLE}} on review' > "$file"
-  unset DCO_GITHUB_HANDLE
-  substitute_github_handle "$file"
-  run cat "$file"
-  [ "$output" = "mention {{DCO_GITHUB_HANDLE}} on review" ]
-}
-
-@test "substitute_github_handle is a no-op when there's no placeholder" {
-  file="$BATS_TEST_TMPDIR/CLAUDE.md"
-  echo 'no placeholder in here' > "$file"
-  DCO_GITHUB_HANDLE="octocat" substitute_github_handle "$file"
-  run cat "$file"
-  [ "$output" = "no placeholder in here" ]
-}
-
-# ── scaffold_devcontainer / scaffold_named_subconfig ─────────────────────
+# ── scaffold_devcontainer ──────────────────────────────────────────────────
 
 @test "scaffold_devcontainer copies templates and config into dest" {
   dest="$BATS_TEST_TMPDIR/.devcontainer"
@@ -276,45 +86,15 @@ setup_git_repo_with_commit() {
 }
 
 @test "scaffold_devcontainer does not touch an existing named sub-config directory" {
+  # simulates a project that has committed its own .devcontainer/<name>/,
+  # e.g. as described in the --sub-config help text
   dest="$BATS_TEST_TMPDIR/.devcontainer"
-  mkdir -p "$dest/autonomous"
-  echo "hand-customized" > "$dest/autonomous/CLAUDE.md"
+  mkdir -p "$dest/custom"
+  echo "hand-customized" > "$dest/custom/devcontainer.json"
   scaffold_devcontainer "$dest"
   [ -f "$dest/devcontainer.json" ]
-  run cat "$dest/autonomous/CLAUDE.md"
+  run cat "$dest/custom/devcontainer.json"
   [ "$output" = "hand-customized" ]
-}
-
-@test "scaffold_named_subconfig scaffolds a shipped profile" {
-  dest="$BATS_TEST_TMPDIR/.devcontainer/autonomous"
-  run scaffold_named_subconfig "autonomous" "$dest"
-  [ "$status" -eq 0 ]
-  [ -f "$dest/devcontainer.json" ]
-  [ -f "$dest/allowlist.txt" ]
-  [ -f "$dest/settings.json" ]
-}
-
-@test "scaffold_named_subconfig does not ship a per-profile init-firewall.sh" {
-  # the autonomous profile's devcontainer.json shares the top-level
-  # Dockerfile (dockerfile: ../Dockerfile), so devcontainer CLI's build
-  # context resolves to the top-level .devcontainer/, not
-  # .devcontainer/autonomous/ -- a scaffolded copy here would look
-  # editable/profile-specific but silently never be read at build time
-  dest="$BATS_TEST_TMPDIR/.devcontainer/autonomous"
-  scaffold_named_subconfig "autonomous" "$dest"
-  [ ! -f "$dest/init-firewall.sh" ]
-}
-
-@test "scaffold_named_subconfig returns 1 for an unknown profile, without dying" {
-  run scaffold_named_subconfig "does-not-exist" "$BATS_TEST_TMPDIR/.devcontainer/nope"
-  [ "$status" -eq 1 ]
-  [ ! -d "$BATS_TEST_TMPDIR/.devcontainer/nope" ]
-}
-
-@test "scaffold_named_subconfig substitutes the github handle into CLAUDE.md" {
-  dest="$BATS_TEST_TMPDIR/.devcontainer/autonomous"
-  DCO_GITHUB_HANDLE="octocat" scaffold_named_subconfig "autonomous" "$dest"
-  grep -q "octocat" "$dest/CLAUDE.md"
 }
 
 # ── scaffold self-consistency ─────────────────────────────────────────────
@@ -350,24 +130,24 @@ assert_dockerfile_resolves() {
   assert_dockerfile_resolves "$dest/devcontainer.json"
 }
 
-@test "the autonomous profile's scaffolded dockerfile reference resolves, fresh workspace" {
+@test "a custom sub-config sharing the top-level Dockerfile resolves once scaffold_devcontainer has run" {
   # mirrors main()'s actual sequence for a workspace that's never had the
   # default profile scaffolded: the shared top-level files have to be
-  # created alongside the sub-config, not just the sub-config itself
+  # created before a sub-config that points "dockerfile" at ../Dockerfile
+  # can build. This project's own .devcontainer/<name>/ is committed by
+  # the user, not scaffolded by dco -- simulated here directly.
   command -v jq &>/dev/null || skip "jq not installed"
   dest="$BATS_TEST_TMPDIR/.devcontainer"
   scaffold_devcontainer "$dest"
-  scaffold_named_subconfig "autonomous" "$dest/autonomous"
-  assert_dockerfile_resolves "$dest/autonomous/devcontainer.json"
+  mkdir -p "$dest/custom"
+  echo '{"build":{"dockerfile":"../Dockerfile"}}' > "$dest/custom/devcontainer.json"
+  assert_dockerfile_resolves "$dest/custom/devcontainer.json"
 }
 
-@test "every shipped profile's dockerfile reference resolves against the source templates" {
+@test "the default profile's dockerfile reference resolves against the source templates" {
   # catches the same bug class one step earlier: even before anything is
-  # scaffolded into a project, does templates/<profile>/devcontainer.json's
-  # own "dockerfile" path resolve within templates/ itself?
+  # scaffolded into a project, does templates/devcontainer.json's own
+  # "dockerfile" path resolve within templates/ itself?
   command -v jq &>/dev/null || skip "jq not installed"
-  for devcontainer_json in "$SHAREDIR"/templates/devcontainer.json "$SHAREDIR"/templates/*/devcontainer.json; do
-    [[ -f "$devcontainer_json" ]] || continue
-    assert_dockerfile_resolves "$devcontainer_json"
-  done
+  assert_dockerfile_resolves "$SHAREDIR/templates/devcontainer.json"
 }
