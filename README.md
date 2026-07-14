@@ -36,24 +36,14 @@ dco [path] [flags]
 
 | Flag | Effect |
 |---|---|
-| `-c`, `--claude` | Launch Claude Code in a persistent tmux session (see below) |
+| `-c`, `--claude` | Launch Claude Code in the project's devcontainer, in a persistent tmux session (see below) |
 | `-r`, `--rebuild` | Force rebuild (removes existing container first) |
 | `-s`, `--stop` | Stop and remove the project's container |
 | `--purge` | Like `--stop`, but also deletes its volumes (bash history, Claude's memory). Irreversible, always confirms first |
 | `-g`, `--regen` | Refresh a project's `.devcontainer/` from the latest templates |
-| `--sub-config <name>` | Use `.devcontainer/<name>/devcontainer.json` instead of the default profile |
+| `--sub-config <name>` | Use `.devcontainer/<name>/devcontainer.json` instead of the default profile. Not scaffolded for you: commit that file yourself first |
 | `-l`, `--list` | List all running devcontainers |
 | `-h`, `--help` | Show help |
-
-`--sub-config <name>` is *not* a separate directory to create alongside your
-project: it names an alternate devcontainer config at
-`<path>/.devcontainer/<name>/devcontainer.json`, for projects that need more
-than one profile (e.g. a default one plus a GPU-enabled one). `dco` ships no
-named profiles of its own to scaffold one from — commit your own
-`.devcontainer/<name>/devcontainer.json` first, then point `--sub-config`
-at it. It can share the top-level `Dockerfile` the way the default profile's
-own config does (`"dockerfile": "../Dockerfile"`), in which case `dco`
-scaffolds those shared top-level files too if they don't exist yet.
 
 ## Detaching and reattaching to Claude
 
@@ -93,13 +83,13 @@ Every profile ships with an optional default-deny network firewall:
 `init-firewall.sh` runs as a `postStartCommand` and, if the resolved
 config's `allowlist.txt` has any active (non-comment, non-blank) entries,
 locks outbound network access down to just those domains plus GitHub's own
-IP ranges (always allowed, for git/`gh`). An empty allowlist — what the
-default profile ships with — makes it a complete no-op, so `dco` is
+IP ranges (always allowed, for git/`gh`). An empty allowlist, what the
+default profile ships with, makes it a complete no-op, so `dco` is
 open-by-default until you opt in.
 
 To enable it for a project: add domains to `.devcontainer/allowlist.txt`
 (or `config/allowlist.txt` before `make install`, to change the default for
-every new project) and `dco --rebuild` — `allowlist.txt` is baked into the
+every new project) and `dco --rebuild`. `allowlist.txt` is baked into the
 image at build time, not bind-mounted, so a plain edit needs a rebuild to
 take effect. `make check-domains` resolves every entry over a real DNS
 query, worth running after adding one: a domain that looks right but
@@ -119,40 +109,11 @@ refreshes it, even though `--regen` otherwise only touches the top-level
 
 ## Git identity
 
-Every launch, `dco` reads `git config --global user.name` / `user.email` from
-the host and sets the same values inside the container (`git config --global`
-there too). No flags, no manual setup per container: it just mirrors
-whatever your host is currently configured with. Only these two values are
-synced; other git config (aliases, signing, credential helpers) is not.
+Every launch, `dco` reads `user.name`/`user.email` from the host (via git's
+own config resolution: the project's local config if set, else your global
+one) and sets those values as the container's global git config. Defaults
+to your host identity with no setup; override it per-project the normal
+git way: `git -C /path/to/project config user.name "..."` on the host,
+no dco-specific mechanism needed. Only these two values are synced; other
+git config (aliases, signing, credential helpers) is not.
 
-## Development
-
-Tests use [bats-core](https://github.com/bats-core/bats-core):
-
-```sh
-npm install -g bats
-make test
-```
-
-`test/unit.bats` covers `dco.in`'s standalone helper functions (slug
-encoding, template scaffolding) by sourcing the script directly.
-`test/cli.bats` drives `main()` end-to-end against fake `docker`/
-`devcontainer` binaries in `test/mocks/` so nothing touches a real
-container. `test/install.bats` exercises `make install`/`uninstall`
-against an isolated temp prefix. None of the suite touches this repo's own
-`.devcontainer/`, `~/.local`, or your real git config.
-
-Because `devcontainer`/`docker` are mocked, `make test` verifies `dco`
-calls the right commands, but not that the resulting file layout would
-actually build: a `devcontainer.json` pointing `"dockerfile"` at a file
-that doesn't exist in the scaffolded tree slips straight through mocks
-that never read a Dockerfile. `test/unit.bats` also statically checks that
-the default profile's `dockerfile` reference resolves to a real file,
-both from the source templates and after a fresh scaffold, to catch that
-class of bug in milliseconds instead of a multi-minute real Docker cycle.
-
-`make check-domains` resolves every domain in `config/allowlist.txt` over
-a real DNS query. Not part of `make test` since it needs actual network
-access; run it after adding or changing anything in that file. A domain
-that looks right but returns NXDOMAIN is otherwise only discoverable as an
-opaque firewall failure at container start.

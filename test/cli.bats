@@ -200,3 +200,18 @@ setup() {
   mock_called_with "git config --global user.name Test User"
   mock_called_with "git config --global user.email test@example.com"
 }
+
+@test "a project-local git identity overrides the host global default" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME"
+  git config --global user.name "Global User"
+  git config --global user.email "global@example.com"
+  git -C "$WS" init -q
+  git -C "$WS" config user.name "Project Bot"
+  git -C "$WS" config user.email "bot@example.com"
+  run main "$WS"
+  [ "$status" -eq 0 ]
+  mock_called_with "git config --global user.name Project Bot"
+  mock_called_with "git config --global user.email bot@example.com"
+  ! mock_called_with "git config --global user.name Global User"
+}

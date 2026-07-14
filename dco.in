@@ -312,9 +312,16 @@ devcontainer up \
   "${UP_ARGS[@]}"
 
 # ── sync git identity from host ───────────────────────────────────────────────
-# container filesystem isn't persisted across rebuilds, so re-sync every launch
-GIT_NAME="$(git config --global user.name 2>/dev/null || true)"
-GIT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
+# container filesystem isn't persisted across rebuilds, so re-sync every
+# launch. Deliberately `git -C "$WORKSPACE" config` rather than
+# `--global`: git's own resolution checks the workspace's local config
+# before falling back to the host's global one, so this defaults to your
+# host identity but is overridable per-project the normal git way --
+# `git -C /path/to/project config user.name "..."` (no --global) on the
+# host, no dco-specific mechanism needed. Works the same whether or not
+# $WORKSPACE is a git repo yet; falls straight through to global either way.
+GIT_NAME="$(git -C "$WORKSPACE" config user.name 2>/dev/null || true)"
+GIT_EMAIL="$(git -C "$WORKSPACE" config user.email 2>/dev/null || true)"
 [[ -n "$GIT_NAME" ]] && devcontainer exec --workspace-folder "$WORKSPACE" --config "$CONFIG" \
   -- git config --global user.name "$GIT_NAME" &>/dev/null
 [[ -n "$GIT_EMAIL" ]] && devcontainer exec --workspace-folder "$WORKSPACE" --config "$CONFIG" \
