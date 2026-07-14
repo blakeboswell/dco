@@ -223,6 +223,21 @@ setup() {
   [ ! -f "$WS/.devcontainer/Dockerfile" ]
 }
 
+@test "--sub-config self-heals a workspace scaffolded before this fix existed" {
+  # simulates the exact broken state hit live: .devcontainer/<name>/ already
+  # scaffolded (so the "scaffold the sub-config" branch is skipped
+  # entirely), but the shared top-level files it depends on were never
+  # created. Must self-heal on the very next launch, not just on a fresh
+  # scaffold, since the sub-config's own devcontainer.json already existing
+  # would otherwise mask the missing Dockerfile forever.
+  mkdir -p "$WS/.devcontainer/autonomous"
+  echo '{}' > "$WS/.devcontainer/autonomous/devcontainer.json"
+  [ ! -f "$WS/.devcontainer/Dockerfile" ]
+  run main "$WS" --sub-config autonomous
+  [ "$status" -eq 0 ]
+  [ -f "$WS/.devcontainer/Dockerfile" ]
+}
+
 @test "--sub-config overrides --dsp's autonomous default" {
   git -C "$WS" init -q
   git -C "$WS" remote add origin "https://github.com/blakeboswell/dco.git"

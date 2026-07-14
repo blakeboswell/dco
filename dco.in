@@ -407,20 +407,23 @@ fi
 
 # ── find config ───────────────────────────────────────────────────────────────
 if [[ -n "$SUB_CONFIG" ]]; then
+  # shipped named sub-configs (e.g. autonomous) point "dockerfile" at the
+  # shared top-level ../Dockerfile. Checked every time a sub-config is
+  # used, not just when scaffolding the sub-config itself: a workspace can
+  # be left with .devcontainer/<name>/ already scaffolded but the shared
+  # files still missing (e.g. from a run before this check existed, or any
+  # other reason the top-level dir is incomplete), and that workspace
+  # would otherwise stay broken forever, since the sub-config's own
+  # devcontainer.json already existing skips past the scaffold branch
+  # below entirely. Self-heals instead of requiring `dco --regen` by hand.
+  # Never touches an existing top-level devcontainer.json/Dockerfile.
+  if [[ ! -f "$WORKSPACE/.devcontainer/devcontainer.json" ]]; then
+    info "no .devcontainer/devcontainer.json found — scaffolding the shared top-level files sub-configs may depend on"
+    scaffold_devcontainer "$WORKSPACE/.devcontainer"
+  fi
+
   CONFIG="$WORKSPACE/.devcontainer/$SUB_CONFIG/devcontainer.json"
   if [[ ! -f "$CONFIG" ]]; then
-    # shipped named sub-configs (e.g. autonomous) point "dockerfile" at the
-    # shared top-level ../Dockerfile, which only exists once the default
-    # profile has been scaffolded. A project whose first-ever dco
-    # invocation is --dsp (skipping plain `dco` entirely) would otherwise
-    # scaffold only .devcontainer/<name>/ and fail later with a Docker
-    # "no such file" error on a Dockerfile that was never created. Scaffold
-    # the shared top-level files first in that case, without touching an
-    # existing top-level devcontainer.json/Dockerfile if one's already there.
-    if [[ ! -f "$WORKSPACE/.devcontainer/devcontainer.json" ]]; then
-      info "no .devcontainer/devcontainer.json found — scaffolding the shared top-level files the '$SUB_CONFIG' profile depends on"
-      scaffold_devcontainer "$WORKSPACE/.devcontainer"
-    fi
     DEST="$WORKSPACE/.devcontainer/$SUB_CONFIG"
     if scaffold_named_subconfig "$SUB_CONFIG" "$DEST"; then
       info "no .devcontainer/$SUB_CONFIG found — scaffolded from the shipped '$SUB_CONFIG' profile"
