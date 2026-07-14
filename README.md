@@ -17,12 +17,14 @@ than one-off. It's built on the
 curl -fsSL https://raw.githubusercontent.com/blakeboswell/dco/main/install.sh | sh
 ```
 
-Installs `dco` to `~/.local/bin` and its templates/config to
-`~/.local/share/dco`. Override the location with
-`curl ... | sh -s -- PREFIX=/usr/local`.
+To uninstall:
 
-To uninstall, clone the repo and run `make uninstall` (with the same
-`PREFIX` if you overrode it). See `make help` for all targets.
+```sh
+curl -fsSL https://raw.githubusercontent.com/blakeboswell/dco/main/uninstall.sh | sh
+```
+
+To customize the install (location, etc.), clone the repo and see the
+Makefile (`make help` for all targets).
 
 ## Usage
 
