@@ -181,7 +181,14 @@ fi
 WORKSPACE="${POSITIONAL[0]:-$(pwd)}"
 WORKSPACE="$(realpath "$WORKSPACE")"
 
-[[ -d "$WORKSPACE" ]] || die "not a directory: $WORKSPACE"
+# --stop/--purge only ever match containers/volumes by this path string —
+# they never read from the directory itself — so don't require it to still
+# exist. Lets you clean up a project that's already been moved or deleted.
+# Every other mode does read/write into it (scaffolding, config resolution,
+# the actual bring-up), so keep the check for those.
+if [[ ! -d "$WORKSPACE" ]] && ! $STOP && ! $PURGE; then
+  die "not a directory: $WORKSPACE"
+fi
 
 DCO_PROJECT_ID="$(project_id "$WORKSPACE" "$SUB_CONFIG")"
 export DCO_PROJECT_ID

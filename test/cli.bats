@@ -33,6 +33,20 @@ setup() {
   [[ "$output" == *"not a directory"* ]]
 }
 
+@test "--stop works against a workspace path that's already been moved or deleted" {
+  # --stop only matches by path string, never reads the directory itself --
+  # a project you've already relocated should still be cleanable up
+  MOCK_DOCKER_CONTAINER_ID="abc123" run main "$BATS_TEST_TMPDIR/does-not-exist" --stop
+  [ "$status" -eq 0 ]
+  mock_called_with "docker rm -f abc123"
+}
+
+@test "--purge works against a workspace path that's already been moved or deleted" {
+  run main "$BATS_TEST_TMPDIR/does-not-exist" --purge < /dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to purge"* ]]
+}
+
 # ── stop mode ─────────────────────────────────────────────────────────────
 
 @test "--stop dies when no container is found for the workspace" {
