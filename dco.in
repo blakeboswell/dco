@@ -86,7 +86,8 @@ Arguments:
 Flags:
   -c, --claude    Launch Claude Code in a persistent tmux session ('claude')
   -r, --rebuild   Force rebuild (removes existing container first)
-  -s, --stop      Stop and remove the project's container
+  -s, --stop      Stop and remove the project's container (scoped to
+                  --sub-config, if given — other sub-configs untouched)
       --purge     Like --stop, but also delete its volumes (bash history,
                   Claude's memory) — irreversible, always confirms first
   -g, --regen     Refresh a project's .devcontainer/ from the latest templates
@@ -185,16 +186,41 @@ WORKSPACE="$(realpath "$WORKSPACE")"
 DCO_PROJECT_ID="$(project_id "$WORKSPACE" "$SUB_CONFIG")"
 export DCO_PROJECT_ID
 
+# ── expected config path (scopes --stop/--purge to one sub-config) ────────────
+# predicts which devcontainer.json a prior `devcontainer up` at this workspace
+# would have used, WITHOUT scaffolding anything (unlike the "find config"
+# resolution below, used for actually bringing a container up) — --stop/
+# --purge must never create files as a side effect of looking something up.
+# Mirrors that resolution's precedence deliberately rather than sharing code
+# with it: the two have genuinely different missing-file behavior (predict vs.
+# create), so unifying them would need a mode flag anyway. Empty if nothing
+# matching exists on disk (e.g. the config was deleted after being used) —
+# --stop/--purge then fall back to scoping by workspace path alone, same as
+# before this existed.
+if [[ -n "$SUB_CONFIG" ]]; then
+  EXPECTED_CONFIG="$WORKSPACE/.devcontainer/$SUB_CONFIG/devcontainer.json"
+  [[ -f "$EXPECTED_CONFIG" ]] || EXPECTED_CONFIG=""
+elif [[ -f "$WORKSPACE/.devcontainer.json" ]]; then
+  EXPECTED_CONFIG="$WORKSPACE/.devcontainer.json"
+elif [[ -f "$WORKSPACE/.devcontainer/devcontainer.json" ]]; then
+  EXPECTED_CONFIG="$WORKSPACE/.devcontainer/devcontainer.json"
+else
+  EXPECTED_CONFIG=""
+fi
+
+FILTER_ARGS=(--filter "label=devcontainer.local_folder=$WORKSPACE")
+[[ -n "$EXPECTED_CONFIG" ]] && FILTER_ARGS+=(--filter "label=devcontainer.config_file=$EXPECTED_CONFIG")
+
 # ── stop mode ─────────────────────────────────────────────────────────────────
 if $STOP; then
-  CONTAINER=$(docker ps -q --filter "label=devcontainer.local_folder=$WORKSPACE")
-  if [[ -z "$CONTAINER" ]]; then
+  mapfile -t CONTAINERS < <(docker ps -q "${FILTER_ARGS[@]}")
+  if [[ ${#CONTAINERS[@]} -eq 0 ]]; then
     # also check stopped containers
-    CONTAINER=$(docker ps -aq --filter "label=devcontainer.local_folder=$WORKSPACE")
+    mapfile -t CONTAINERS < <(docker ps -aq "${FILTER_ARGS[@]}")
   fi
-  [[ -n "$CONTAINER" ]] || die "no container found for $WORKSPACE"
-  info "removing container for $WORKSPACE ..."
-  docker rm -f "$CONTAINER"
+  [[ ${#CONTAINERS[@]} -gt 0 ]] || die "no container found for $WORKSPACE"
+  info "removing container(s) for $WORKSPACE ..."
+  docker rm -f "${CONTAINERS[@]}"
   info "done."
   exit 0
 fi
@@ -206,9 +232,9 @@ fi
 # and it's fine for either the container or the volumes to already be
 # gone (e.g. after a prior --stop) — it just removes whatever it finds.
 if $PURGE; then
-  CONTAINER=$(docker ps -q --filter "label=devcontainer.local_folder=$WORKSPACE")
-  if [[ -z "$CONTAINER" ]]; then
-    CONTAINER=$(docker ps -aq --filter "label=devcontainer.local_folder=$WORKSPACE")
+  mapfile -t CONTAINERS < <(docker ps -q "${FILTER_ARGS[@]}")
+  if [[ ${#CONTAINERS[@]} -eq 0 ]]; then
+    mapfile -t CONTAINERS < <(docker ps -aq "${FILTER_ARGS[@]}")
   fi
 
   VOLUMES=()
@@ -216,19 +242,19 @@ if $PURGE; then
     docker volume inspect "$v" &>/dev/null && VOLUMES+=("$v")
   done
 
-  if [[ -z "$CONTAINER" && ${#VOLUMES[@]} -eq 0 ]]; then
+  if [[ ${#CONTAINERS[@]} -eq 0 && ${#VOLUMES[@]} -eq 0 ]]; then
     info "nothing to purge for $WORKSPACE (no container or volumes found)"
     exit 0
   fi
 
   info "this will permanently remove, for $WORKSPACE:"
-  [[ -n "$CONTAINER" ]] && info "  - container $CONTAINER"
+  for c in "${CONTAINERS[@]}"; do info "  - container $c"; done
   for v in "${VOLUMES[@]}"; do info "  - volume $v (irreversible — this is where Claude's memory for this project lives)"; done
   REPLY=""
   read -r -p "dco: continue? [y/N] " REPLY || true
   [[ "$REPLY" =~ ^[Yy]$ ]] || die "purge aborted."
 
-  [[ -n "$CONTAINER" ]] && { info "removing container ..."; docker rm -f "$CONTAINER" &>/dev/null; }
+  [[ ${#CONTAINERS[@]} -gt 0 ]] && { info "removing container(s) ..."; docker rm -f "${CONTAINERS[@]}" &>/dev/null; }
   for v in "${VOLUMES[@]}"; do
     info "removing volume $v ..."
     docker volume rm "$v" &>/dev/null

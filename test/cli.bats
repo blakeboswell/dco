@@ -47,6 +47,22 @@ setup() {
   mock_called_with "docker rm -f abc123"
 }
 
+@test "--stop removes every matching container, not just the first, when several share a workspace path" {
+  # regression: a prior version passed a multi-line docker-ps result to
+  # `docker rm -f` as one quoted argument, so it silently matched nothing
+  MOCK_DOCKER_CONTAINER_ID=$'abc123\ndef456' run main "$WS" --stop
+  [ "$status" -eq 0 ]
+  mock_called_with "docker rm -f abc123 def456"
+}
+
+@test "--stop scopes its container filter to the requested sub-config" {
+  mkdir -p "$WS/.devcontainer/custom"
+  echo '{}' > "$WS/.devcontainer/custom/devcontainer.json"
+  MOCK_DOCKER_CONTAINER_ID="abc123" run main "$WS" --sub-config custom --stop
+  [ "$status" -eq 0 ]
+  mock_called_with "label=devcontainer.config_file=$WS/.devcontainer/custom/devcontainer.json"
+}
+
 # ── purge mode ────────────────────────────────────────────────────────────
 
 @test "--purge exits cleanly with nothing to do when no container or volumes exist" {
@@ -86,6 +102,26 @@ setup() {
   mock_called_with "docker rm -f abc123"
   mock_called_with "docker volume rm claude-code-config-$id"
   ! mock_called_with "docker volume rm claude-code-bashhistory-$id"
+}
+
+@test "--purge removes every matching container when several share a workspace path" {
+  id="$(project_id "$WS")"
+  MOCK_DOCKER_CONTAINER_ID=$'abc123\ndef456' \
+    MOCK_DOCKER_VOLUMES="claude-code-bashhistory-$id claude-code-config-$id" \
+    run main "$WS" --purge <<< "y"
+  [ "$status" -eq 0 ]
+  mock_called_with "docker rm -f abc123 def456"
+}
+
+@test "--purge with --sub-config never touches another sub-config's container filter" {
+  mkdir -p "$WS/.devcontainer/custom"
+  echo '{}' > "$WS/.devcontainer/custom/devcontainer.json"
+  id="$(project_id "$WS" custom)"
+  MOCK_DOCKER_CONTAINER_ID="abc123" \
+    MOCK_DOCKER_VOLUMES="claude-code-bashhistory-$id claude-code-config-$id" \
+    run main "$WS" --sub-config custom --purge <<< "y"
+  [ "$status" -eq 0 ]
+  mock_called_with "label=devcontainer.config_file=$WS/.devcontainer/custom/devcontainer.json"
 }
 
 # ── config resolution / scaffolding ───────────────────────────────────────
